@@ -1,10 +1,16 @@
 
-import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import {
+    BadRequestException,
+    ConflictException,
+    ServiceUnavailableException,
+} from '@nestjs/common';
 import { PaymentsService } from './payments.service';
+import { Types } from 'mongoose';
 
 describe('PaymentsService', () => {
     const payment = {
         _id: '507f1f77bcf86cd799439011',
+        companyId: new Types.ObjectId(),
         amount: 10000,
         refundedAmount: 7000,
         status: 'SUCCESS',
@@ -21,6 +27,10 @@ describe('PaymentsService', () => {
         findOneAndUpdate: jest.fn(),
     };
 
+    const terminals: any = {
+        findOne: jest.fn(),
+    };
+
     const provider: any = {
         sale: jest.fn(),
         refund: jest.fn(),
@@ -32,7 +42,12 @@ describe('PaymentsService', () => {
         reserveIdempotency: jest.fn(),
     };
 
-    const service = new PaymentsService(model, provider, redis);
+    const service = new PaymentsService(
+        model,
+        terminals,
+        provider,
+        redis,
+    );
 
     const dto: any = {
         companyId: '507f1f77bcf86cd799439012',
@@ -47,8 +62,16 @@ describe('PaymentsService', () => {
         jest.clearAllMocks();
 
         redis.reserveIdempotency.mockResolvedValue('RESERVED');
+
         model.findOne.mockReturnValue({
             lean: jest.fn().mockResolvedValue(null),
+        });
+
+        terminals.findOne.mockReturnValue({
+            lean: jest.fn().mockResolvedValue({
+                _id: new Types.ObjectId(),
+                isActive: true,
+            }),
         });
 
         payment.save.mockResolvedValue(payment);
@@ -79,7 +102,7 @@ describe('PaymentsService', () => {
     });
 
     it('ayný key farklý istekle kullanýlýrsa hata vermeli', async () => {
-        redis.reserveIdempotency.mockResolvedValue('CONFLICT');
+        redis.reserveIdempotency.mockResolvedValueOnce('CONFLICT');
 
         await expect(
             service.create(dto, 'key-1001'),
@@ -89,7 +112,7 @@ describe('PaymentsService', () => {
     });
 
     it('Redis kullanýlamýyorsa ödeme oluþturmamalý', async () => {
-        redis.reserveIdempotency.mockResolvedValue('UNAVAILABLE');
+        redis.reserveIdempotency.mockResolvedValueOnce('UNAVAILABLE');
 
         await expect(
             service.create(dto, 'key-1001'),
@@ -99,23 +122,52 @@ describe('PaymentsService', () => {
     });
 
     it('iade tutarý kalan tutarý aþarsa hata vermeli', async () => {
-        model.findById.mockResolvedValue(payment);
+        model.findOne.mockResolvedValue(payment);
 
         await expect(
-            service.refund(payment._id, 4000),
+            service.refund(
+                payment._id.toString(),
+                payment.companyId.toString(),
+                4000,
+            ),
         ).rejects.toBeInstanceOf(BadRequestException);
 
         expect(provider.refund).not.toHaveBeenCalled();
     });
 
     it('baþarýsýz ödeme için iade yapýlmamalý', async () => {
-        model.findById.mockResolvedValue({
+        model.findOne.mockResolvedValue({
             ...payment,
             status: 'FAILED',
         });
 
         await expect(
-            service.refund(payment._id, 1000),
+            service.refund(
+                payment._id.toString(),
+                payment.companyId.toString(),
+                1000,
+            ),
         ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('farklý þirketler ayný merchantReference deðerini kullanabilmeli', async () => {
+        const companyA = '507f1f77bcf86cd799439012';
+        const companyB = '507f1f77bcf86cd799439014';
+
+        model.findOne.mockReturnValue({
+            lean: jest.fn().mockResolvedValue(null),
+        });
+
+        await service.create(
+            { ...dto, companyId: companyA },
+            'key-company-a',
+        );
+
+        await service.create(
+            { ...dto, companyId: companyB },
+            'key-company-b',
+        );
+
+        expect(model.create).toHaveBeenCalledTimes(2);
     });
 });

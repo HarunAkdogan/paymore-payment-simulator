@@ -6,12 +6,13 @@ import { TerminalsModule } from './terminals/terminals.module';
 import { PaymentsModule } from './payments/payments.module';
 import { RedisModule } from './common/redis.module';
 import { HealthController } from './common/health.controller';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    MongooseModule.forRootAsync({ imports: [ConfigModule], inject: [ConfigService], useFactory: (c: ConfigService) => ({ uri: c.get<string>('MONGODB_URI', 'mongodb://localhost:27017/paymore_simulator') }) }),
-    RedisModule, CompaniesModule, TerminalsModule, PaymentsModule,
+        MongooseModule.forRootAsync({ imports: [ConfigModule], inject: [ConfigService], useFactory: (c: ConfigService) => ({ uri: c.get<string>('MONGODB_URI', 'mongodb://localhost:27017/paymore_simulator') }) }),
+        RedisModule, CompaniesModule, TerminalsModule, PaymentsModule, AuthModule,
   ],
   controllers: [HealthController],
 })

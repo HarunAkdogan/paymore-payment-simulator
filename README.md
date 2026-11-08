@@ -27,12 +27,14 @@ flowchart TD
 ## Data model
 - `companies`: `name`, unique `code`, `isActive`.
 - `terminals`: `companyId`, unique `terminalCode`, `isActive`.
-- `payments`: company/terminal refs, unique `merchantReference`, integer minor-unit `amount`, currency, status, provider reference, cumulative refunded amount and inquiry metadata.
+- `payments`: company/terminal refs, Unique compound index on payments.companyId + merchantReference:
+each company can use a merchant reference only once `merchantReference`, integer minor-unit `amount`, currency, status, provider reference, cumulative refunded amount and inquiry metadata.
 
 ### Index rationale
 - Unique `companies.code`: prevent duplicate company codes.
 - Unique `terminals.terminalCode`: prevent terminal code duplication; compound `{companyId, terminalCode}` supports tenant-scoped lookup.
-- Unique `payments.merchantReference`: one internal reference maps to one payment.
+- Unique compound index on payments.companyId + merchantReference:
+each company can use a merchant reference only once.
 - `{companyId, createdAt}`: recent company transaction listing.
 - `{terminalId, status, createdAt}`: terminal/status operational filtering.
 

@@ -6,8 +6,10 @@ export enum PaymentStatus { CREATED='CREATED', PENDING='PENDING', SUCCESS='SUCCE
 export class Payment {
   @Prop({ type: Types.ObjectId, ref: 'Company', required: true, index: true }) companyId!: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'Terminal', required: true, index: true }) terminalId!: Types.ObjectId;
-  @Prop({ required: true, unique: true, index: true }) merchantReference!: string;
-  @Prop({ required: true, min: 1 }) amount!: number; // minor units: 100 = 1.00 TRY
+    @Prop({ required: true })
+    merchantReference!: string;
+    @Prop({ required: true, min: 1, validate: Number.isInteger })
+    amount!: number; // minor units: 100 = 1.00 TRY
   @Prop({ required: true, default: 'TRY' }) currency!: string;
   @Prop({ enum: PaymentStatus, default: PaymentStatus.CREATED, index: true }) status!: PaymentStatus;
   @Prop() providerReference?: string;
@@ -19,4 +21,7 @@ export class Payment {
 export const PaymentSchema = SchemaFactory.createForClass(Payment);
 PaymentSchema.index({ companyId: 1, createdAt: -1 });
 PaymentSchema.index({ terminalId: 1, status: 1, createdAt: -1 });
-PaymentSchema.index({ merchantReference: 1 }, { unique: true });
+PaymentSchema.index(
+    { companyId: 1, merchantReference: 1 },
+    { unique: true }
+);

@@ -8,7 +8,7 @@ class CreateCompanyDto { @IsString() @MinLength(2) name!: string; @IsString() @M
 @ApiTags('companies')
 @Controller('companies')
 export class CompaniesController {
-  constructor(@InjectModel(Company.name) private readonly companies: Model<CompanyDocument>) {}
-  @Post() @ApiOperation({ summary: 'Create a company' }) create(@Body() dto: CreateCompanyDto) { return this.companies.create(dto); }
-  @Get() findAll() { return this.companies.find().sort({ createdAt: -1 }).lean(); }
+    constructor(@InjectModel(Company.name) private readonly companies: Model<CompanyDocument>) { }
+    @Post() @ApiOperation({ summary: 'Create a company' }) create(@Body() dto: CreateCompanyDto) { return this.companies.create(dto); }
+    @Get() findAll() { return this.companies.find().sort({ createdAt: -1 }).lean(); }
 }
