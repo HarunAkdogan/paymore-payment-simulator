@@ -1,9 +1,12 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+
 export type PaymentDocument = HydratedDocument<Payment>;
 export enum PaymentStatus { CREATED='CREATED', PENDING='PENDING', SUCCESS='SUCCESS', FAILED='FAILED', UNKNOWN='UNKNOWN', VOIDED='VOIDED', PARTIALLY_REFUNDED='PARTIALLY_REFUNDED', REFUNDED='REFUNDED' }
 @Schema({ timestamps: true })
 export class Payment {
+    @Prop({ type: [String], default: [] })
+    processedMqttMessageIds!: string[];
   @Prop({ type: Types.ObjectId, ref: 'Company', required: true, index: true }) companyId!: Types.ObjectId;
   @Prop({ type: Types.ObjectId, ref: 'Terminal', required: true, index: true }) terminalId!: Types.ObjectId;
     @Prop({ required: true })

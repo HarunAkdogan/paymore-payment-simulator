@@ -344,4 +344,114 @@ export class PaymentsService {
             .limit(100)
             .lean();
     }
+
+
+    async applyMqttStatus(
+        paymentId: string,
+        terminalId: string,
+        messageId: string,
+        incomingStatus: 'SUCCESS' | 'DECLINED' | 'PENDING' | 'TIMEOUT',
+    ): Promise<'UPDATED' | 'DUPLICATE' | 'IGNORED' | 'CONFLICT'> {
+        if (
+            !Types.ObjectId.isValid(paymentId) ||
+            !Types.ObjectId.isValid(terminalId)
+        ) {
+            throw new BadRequestException('Invalid paymentId or terminalId');
+        }
+
+        if (
+            !messageId ||
+            messageId.trim().length === 0 ||
+            messageId.length > 128
+        ) {
+            throw new BadRequestException('Invalid messageId');
+        }
+
+        // Provider durumlarýný uygulamanýn PaymentStatus deðerlerine dönüþtür.
+        const targetStatus: PaymentStatus | null = {
+            SUCCESS: PaymentStatus.SUCCESS,
+            DECLINED: PaymentStatus.FAILED,
+            PENDING: PaymentStatus.PENDING,
+            TIMEOUT: PaymentStatus.UNKNOWN,
+        }[incomingStatus];
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const current = await this.payments
+                .findOne({
+                    _id: new Types.ObjectId(paymentId),
+                    terminalId: new Types.ObjectId(terminalId),
+                })
+                .select('status processedMqttMessageIds')
+                .lean();
+
+            if (!current) {
+                throw new NotFoundException(
+                    'Payment not found for this terminal',
+                );
+            }
+
+            if (current.processedMqttMessageIds?.includes(messageId)) {
+                return 'DUPLICATE';
+            }
+
+            let result: 'UPDATED' | 'DUPLICATE' | 'IGNORED' | 'CONFLICT';
+
+            if (incomingStatus === 'PENDING') {
+                if (current.status === PaymentStatus.PENDING) {
+                    result = 'DUPLICATE';
+                } else if (current.status === PaymentStatus.CREATED) {
+                    result = 'UPDATED';
+                } else {
+                    // PENDING mesajý mevcut UNKNOWN veya kesin sonucu geriye almaz.
+                    result = 'IGNORED';
+                }
+            } else if (incomingStatus === 'TIMEOUT') {
+                if (current.status === PaymentStatus.PENDING) {
+                    result = 'UPDATED';
+                } else if (current.status === PaymentStatus.UNKNOWN) {
+                    result = 'DUPLICATE';
+                } else {
+                    result = 'IGNORED';
+                }
+            } else if (
+                current.status === PaymentStatus.PENDING ||
+                current.status === PaymentStatus.UNKNOWN
+            ) {
+                result = 'UPDATED';
+            } else if (current.status === targetStatus) {
+                result = 'DUPLICATE';
+            } else {
+                result = 'CONFLICT';
+            }
+
+            const update = {
+                $addToSet: {
+                    processedMqttMessageIds: messageId,
+                },
+                ...(result === 'UPDATED' && targetStatus
+                    ? { $set: { status: targetStatus } }
+                    : {}),
+            };
+
+            const updated = await this.payments.findOneAndUpdate(
+                {
+                    _id: new Types.ObjectId(paymentId),
+                    terminalId: new Types.ObjectId(terminalId),
+                    status: current.status,
+                    processedMqttMessageIds: { $ne: messageId },
+                },
+                update,
+                { new: true },
+            );
+
+            if (updated) {
+                return result;
+            }
+        }
+
+        throw new ConflictException(
+            'Payment changed concurrently; MQTT message must be retried',
+        );
+    }
+
 }

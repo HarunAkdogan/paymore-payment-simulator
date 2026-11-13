@@ -10,6 +10,7 @@ import { MockProviderService } from './providers/mock-provider.service';
 import { RateLimitGuard } from '../common/rate-limit.guard';
 import { Terminal, TerminalSchema } from '../terminals/terminal.schema';
 
+
 @Module({
     imports: [
         AuthModule,
@@ -18,6 +19,7 @@ import { Terminal, TerminalSchema } from '../terminals/terminal.schema';
             { name: Terminal.name, schema: TerminalSchema },
         ]),
     ],
+    exports: [PaymentsService],
     controllers: [PaymentsController],
     providers: [
         PaymentsService,
