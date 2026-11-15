@@ -18,8 +18,15 @@ export interface PaymentProvider {
 
     void(providerReference: string): Promise<{ success: boolean }>;
 
+
     refund(
         providerReference: string,
         amount: number,
-    ): Promise<{ success: boolean; refundedAmount: number }>;
+        idempotencyKey: string,
+    ): Promise<{
+        success: boolean;
+        refundedAmount: number;
+        refundReference?: string;
+    }>;
+
 }

@@ -1,17 +1,25 @@
+
 services:
   mongodb:
-    image: mongo:7
-    container_name: paymore-mongodb
-    restart: unless-stopped
-    ports: ["27017:27017"]
-    volumes: ["mongo_data:/data/db"]
+        image: mongo:7
+        container_name: paymore-mongodb
+        restart: unless-stopped
+        command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+        ports:
+          - "27017:27017"
+        volumes:
+          - mongo_data:/data/db
+
   redis:
     image: redis:7-alpine
     container_name: paymore-redis
     restart: unless-stopped
-    ports: ["6379:6379"]
+    ports:
+      - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
-    volumes: ["redis_data:/data"]
+    volumes:
+      - redis_data:/data
+
   mqtt:
     image: eclipse-mosquitto:2
     container_name: paymore-mqtt
@@ -21,6 +29,15 @@ services:
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - mosquitto_data:/mosquitto/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: paymore-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
 volumes:
   mongo_data:
   redis_data:

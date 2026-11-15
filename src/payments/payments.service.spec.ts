@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { Types } from 'mongoose';
+import { OutboxEvent } from '../outbox/outbox.schema';
 
 describe('PaymentsService', () => {
     const payment = {
         _id: '507f1f77bcf86cd799439011',
         companyId: new Types.ObjectId(),
+        terminalId: new Types.ObjectId(),
         amount: 10000,
         refundedAmount: 7000,
         status: 'SUCCESS',
@@ -20,11 +22,21 @@ describe('PaymentsService', () => {
         toObject: jest.fn(),
     };
 
+    const session: any = {
+        withTransaction: jest.fn(async (callback) => {
+            await callback();
+        }),
+        endSession: jest.fn().mockResolvedValue(undefined),
+    };
+
     const model: any = {
         findById: jest.fn(),
         findOne: jest.fn(),
         create: jest.fn(),
         findOneAndUpdate: jest.fn(),
+        db: {
+            startSession: jest.fn().mockResolvedValue(session),
+        },
     };
 
     const terminals: any = {
@@ -39,15 +51,37 @@ describe('PaymentsService', () => {
     };
 
     const redis: any = {
-        reserveIdempotency: jest.fn(),
+        reserveIdempotency: jest.fn().mockResolvedValue({
+            reserved: true,
+        }),
     };
+
+    const rabbitMq = {
+        publishPaymentCompleted: jest.fn().mockResolvedValue(undefined),
+    } as any;
+
+    const outbox = {
+        create: jest.fn().mockResolvedValue([]),
+    };
+
+    const refund = {
+        create: jest.fn(),
+        findOne: jest.fn(),
+        findById: jest.fn(),
+        updateOne: jest.fn(),
+    } as any;
 
     const service = new PaymentsService(
         model,
         terminals,
+        outbox as any,
+        refund,
         provider,
         redis,
+        rabbitMq,
     );
+
+   
 
     const dto: any = {
         companyId: '507f1f77bcf86cd799439012',
@@ -129,6 +163,7 @@ describe('PaymentsService', () => {
                 payment._id.toString(),
                 payment.companyId.toString(),
                 4000,
+                'refund-test-002',
             ),
         ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -146,6 +181,7 @@ describe('PaymentsService', () => {
                 payment._id.toString(),
                 payment.companyId.toString(),
                 1000,
+                'refund-test-002',
             ),
         ).rejects.toBeInstanceOf(ConflictException);
     });

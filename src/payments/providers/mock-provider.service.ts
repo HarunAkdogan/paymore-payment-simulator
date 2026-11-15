@@ -10,6 +10,18 @@ import {
 export class MockProviderService implements PaymentProvider {
     private readonly outcomes = new Map<string, ProviderResult>();
 
+    private readonly refundOutcomes = new Map<
+        string,
+        {
+            amount: number;
+            result: {
+                success: boolean;
+                refundedAmount: number;
+                refundReference?: string;
+            };
+        }
+    >();
+
     private getKey(companyId: string, merchantReference: string): string {
         return `${companyId}:${merchantReference}`;
     }
@@ -25,8 +37,6 @@ export class MockProviderService implements PaymentProvider {
         const providerReference = `MOCK-${input.companyId}-${input.merchantReference}`;
 
         if (scenario === 'TIMEOUT') {
-            // Provider completes the operation but the response is lost.
-            // Inquiry can recover the result.
             this.outcomes.set(key, {
                 status: 'SUCCESS',
                 providerReference,
@@ -67,12 +77,40 @@ export class MockProviderService implements PaymentProvider {
     }
 
     async refund(
-        _providerReference: string,
+        providerReference: string,
         amount: number,
-    ): Promise<{ success: boolean; refundedAmount: number }> {
-        return {
+        idempotencyKey: string,
+    ): Promise<{
+        success: boolean;
+        refundedAmount: number;
+        refundReference?: string;
+    }> {
+        const key = `${providerReference}:${idempotencyKey}`;
+
+        const existing = this.refundOutcomes.get(key);
+
+        if (existing) {
+            if (existing.amount !== amount) {
+                return {
+                    success: false,
+                    refundedAmount: 0,
+                };
+            }
+
+            return existing.result;
+        }
+
+        const result = {
             success: amount > 0,
-            refundedAmount: amount,
+            refundedAmount: amount > 0 ? amount : 0,
+            refundReference: `REFUND-${key}`,
         };
+
+        this.refundOutcomes.set(key, {
+            amount,
+            result,
+        });
+
+        return result;
     }
 }

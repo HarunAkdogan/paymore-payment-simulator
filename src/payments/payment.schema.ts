@@ -16,7 +16,10 @@ export class Payment {
   @Prop({ required: true, default: 'TRY' }) currency!: string;
   @Prop({ enum: PaymentStatus, default: PaymentStatus.CREATED, index: true }) status!: PaymentStatus;
   @Prop() providerReference?: string;
-  @Prop({ default: 0, min: 0 }) refundedAmount!: number;
+    @Prop({ default: 0, min: 0 })
+    refundedAmount!: number;
+    @Prop({ default: 0, min: 0 })
+    refundPendingAmount!: number;
   @Prop() failureReason?: string;
   @Prop({ default: 0 }) inquiryAttempts!: number;
   @Prop() lastInquiryAt?: Date;

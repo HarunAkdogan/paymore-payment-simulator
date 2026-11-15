@@ -76,15 +76,19 @@ export class PaymentsController {
     }
 
     @Post(':id/refund')
+    @ApiHeader({ name: 'Idempotency-Key', required: true })
+    @ApiOperation({ summary: 'Refund a payment' })
     refund(
         @Param('id') id: string,
         @Body() dto: RefundDto,
+        @Headers('idempotency-key') key: string,
         @Req() req: AuthenticatedRequest,
     ) {
         return this.payments.refund(
             id,
             req.user.companyId,
             dto.amount,
+            key,
         );
     }
 }

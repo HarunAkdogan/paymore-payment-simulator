@@ -9,6 +9,8 @@ import { PaymentsService } from './payments.service';
 import { MockProviderService } from './providers/mock-provider.service';
 import { RateLimitGuard } from '../common/rate-limit.guard';
 import { Terminal, TerminalSchema } from '../terminals/terminal.schema';
+import { OutboxModule } from '../outbox/outbox.module';
+import { Refund, RefundSchema } from './refund.schema';
 
 
 @Module({
@@ -17,7 +19,9 @@ import { Terminal, TerminalSchema } from '../terminals/terminal.schema';
         MongooseModule.forFeature([
             { name: Payment.name, schema: PaymentSchema },
             { name: Terminal.name, schema: TerminalSchema },
+            { name: Refund.name, schema: RefundSchema },
         ]),
+        OutboxModule,
     ],
     exports: [PaymentsService],
     controllers: [PaymentsController],
