@@ -374,9 +374,9 @@ describe('PaymentsService', () => {
 
         const paymentDocument = {
             ...payment,
-            status: 'SUCCESS',
+            status: 'REFUNDED',
             providerReference: 'mock-ref',
-            refundedAmount: 1000,
+            refundedAmount: 10000,
             refundPendingAmount: 0,
         };
 
