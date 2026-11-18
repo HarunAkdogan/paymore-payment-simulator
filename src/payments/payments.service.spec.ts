@@ -17,6 +17,8 @@ describe('PaymentsService', () => {
         terminalId: new Types.ObjectId(),
         amount: 10000,
         refundedAmount: 7000,
+        refundPendingAmount: 0,
+        requestFingerprint: '',
         status: 'SUCCESS',
         merchantReference: 'ORDER-1001',
         providerReference: 'mock-ref',
