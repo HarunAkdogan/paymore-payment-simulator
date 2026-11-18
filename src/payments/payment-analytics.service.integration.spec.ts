@@ -16,11 +16,7 @@ describe('PaymentAnalyticsService Integration', () => {
     let module: TestingModule;
 
     beforeAll(async () => {
-        const mongoUri = process.env.MONGODB_TEST_URI;
-
-        if (!mongoUri) {
-            throw new Error('MONGODB_TEST_URI tanýmlanmamýþ!');
-        }
+        const mongoUri = process.env.MONGODB_TEST_URI ?? 'mongodb://127.0.0.1:27017/paymore_test?replicaSet=rs0';
 
         module = await Test.createTestingModule({
             imports: [
@@ -49,7 +45,7 @@ describe('PaymentAnalyticsService Integration', () => {
         }
     });
 
-    it('gerçek MongoDB üzerinden þirketin ödeme sayýsýný bulmalý', async () => {
+    it('gerÃ§ek MongoDB Ã¼zerinden Ã¾irketin Ã¶deme sayÃ½sÃ½nÃ½ bulmalÃ½', async () => {
         const companyId = new Types.ObjectId();
         const terminalId = new Types.ObjectId();
 
