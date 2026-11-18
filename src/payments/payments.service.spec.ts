@@ -9,6 +9,7 @@ import {
 import { PaymentsService } from './payments.service';
 import { Types } from 'mongoose';
 import { OutboxEvent } from '../outbox/outbox.schema';
+import { CreatePaymentDto } from './dto/create-payment.dto';
 
 describe('PaymentsService', () => {
     const payment = {
@@ -1000,5 +1001,159 @@ describe('PaymentsService', () => {
         // Transaction baslamadan onceki rezervasyon yapilmis olmali.
         expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
     });
+
+
+    it('provider PENDING döndürürse payment PENDING kalmalı ve Outbox oluşturulmamalı', async()=>{
+
+        provider.sale.mockResolvedValueOnce({
+            status: 'PENDING',
+            providerReference: 'mock-ref',
+        });
+
+        const idempotencyKey = 'key-repeat-001';
+        const result = await service.create(dto, idempotencyKey);
+
+        
+
+        payment.status = "PENDING";
+        model.create.mockResolvedValue(payment);
+
+        expect(result.status).toBe("PENDING");
+        expect(provider.sale).toHaveBeenCalledTimes(1);
+        expect(model.create).toHaveBeenCalledTimes(1);
+        expect(outbox.create).not.toHaveBeenCalled();
+    });
+
+
+    it('UNKNOWN ödeme Inquiry ile SUCCESS olduğunda Outbox kaydı oluşturulmalı', async () => {
+        // 1. Ödeme oluşturulurken provider UNKNOWN dönsün.
+        provider.sale.mockResolvedValueOnce({
+            status: 'UNKNOWN',
+            providerReference: 'mock-ref',
+        });
+
+        const idempotencyKey = 'key-unknown-inquiry-001';
+
+        // 2. Ödemeyi oluştur.
+        const result = await service.create(dto, idempotencyKey);
+
+        // 3. İlk aşamada ödeme UNKNOWN olmalı ve Outbox kaydı oluşmamalı.
+        expect(result.status).toBe('UNKNOWN');
+        expect(outbox.create).not.toHaveBeenCalled();
+
+        // 4. Inquiry sırasında provider SUCCESS dönsün.
+        provider.inquiry.mockResolvedValueOnce({
+            status: 'SUCCESS',
+            providerReference: 'mock-ref',
+        });
+
+        // 5. Inquiry metodunun bulacağı ödeme belgesini hazırla.
+        const paymentDocument = {
+            ...payment,
+            status: 'UNKNOWN',
+            companyId: result.companyId,
+            toObject: jest.fn(),
+        };
+
+        paymentDocument.toObject.mockReturnValue(paymentDocument);
+
+        model.findOne.mockResolvedValueOnce(paymentDocument);
+
+        // 6. Inquiry sonrasında MongoDB'nin döndüreceği güncel ödeme.
+        const updatedPayment = {
+            ...paymentDocument,
+            status: 'SUCCESS',
+            toObject: jest.fn(),
+        };
+
+        updatedPayment.toObject.mockReturnValue(updatedPayment);
+
+        model.findOneAndUpdate.mockResolvedValueOnce(updatedPayment);
+
+        // 7. Inquiry çağrısını gerçekleştir.
+        const result2 = await service.inquiry(
+            result._id.toString(),
+            result.companyId.toString(),
+        );
+
+        // 8. Sonucun SUCCESS olduğunu doğrula.
+        expect(result2.status).toBe('SUCCESS');
+
+        // 9. Provider inquiry çağrısını doğrula.
+        expect(provider.inquiry).toHaveBeenCalledTimes(1);
+
+        // 10. SUCCESS sonrası Outbox kaydı oluşturulduğunu doğrula.
+        expect(outbox.create).toHaveBeenCalledTimes(1);
+
+        expect(outbox.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    eventType: 'payment.completed',
+                    status: 'PENDING',
+                }),
+            ],
+            expect.anything(),
+        );
+    });
+
+
+
+    it('PENDING ödeme Inquiry ile FAILED olduğunda ödeme durumunun güncellenmeli ve Outbox kaydı oluşturulmamalı', async () => {
+
+        provider.sale.mockResolvedValueOnce({
+            status: 'PENDING',
+            providerReference: 'mock-ref',
+        });
+
+        const idempotencyKey = 'key-failed-inquiry-001';
+
+        const result = await service.create(dto, idempotencyKey);
+
+        expect(result.status).toBe('PENDING');
+        expect(outbox.create).not.toHaveBeenCalled();
+
+        provider.inquiry.mockResolvedValueOnce({
+            status: 'FAILED',
+            providerReference: 'mock-ref',
+        });
+
+        // Inquiry öncesindeki ödeme belgesi.
+        const paymentDocument = {
+            ...payment,
+            status: 'PENDING',
+            companyId: result.companyId,
+            toObject: jest.fn(),
+        };
+
+        paymentDocument.toObject.mockReturnValue(paymentDocument);
+
+        model.findOne.mockResolvedValueOnce(paymentDocument);
+
+        // Inquiry sonrasındaki güncel ödeme.
+        const updatedPayment = {
+            ...paymentDocument,
+            status: 'FAILED',
+            toObject: jest.fn(),
+        };
+
+        updatedPayment.toObject.mockReturnValue(updatedPayment);
+
+        model.findOneAndUpdate.mockResolvedValueOnce(updatedPayment);
+
+        const result2 = await service.inquiry(
+            result._id.toString(),
+            result.companyId.toString(),
+        );
+
+        // Ödeme FAILED durumuna geçmiş olmalı.
+        expect(result2.status).toBe('FAILED');
+
+        // Provider sorgulanmış olmalı.
+        expect(provider.inquiry).toHaveBeenCalledTimes(1);
+
+        // Ödeme başarısız olduğu için Outbox kaydı oluşmamalı.
+        expect(outbox.create).not.toHaveBeenCalled();
+    });
+
 
 });

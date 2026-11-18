@@ -70,6 +70,21 @@ export class PaymentsController {
         );
     }
 
+
+    @Get(':id/status-history')
+    @ApiOperation({ summary: 'Get payment status history' })
+    getStatusHistory(
+        @Param('id') id: string,
+        @Req() req: AuthenticatedRequest,
+    ) {
+        return this.payments.getStatusHistory(
+            id,
+            req.user.companyId,
+        );
+    }
+
+
+
     @Post(':id/inquiry')
     inquiry(
         @Param('id') id: string,

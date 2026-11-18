@@ -328,6 +328,40 @@ export class PaymentsService {
         return payment;
     }
 
+    // --------------------------------------------------
+    // GET STATUS HISTORY
+    // --------------------------------------------------
+
+
+
+    async getStatusHistory(id: string, companyId: string) {
+        if (
+            !Types.ObjectId.isValid(id) ||
+            !Types.ObjectId.isValid(companyId)
+        ) {
+            throw new NotFoundException('Payment not found');
+        }
+
+        const payment = await this.payments
+            .findOne({
+                _id: new Types.ObjectId(id),
+                companyId: new Types.ObjectId(companyId),
+            })
+            .select('_id status statusHistory createdAt')
+            .lean();
+
+        if (!payment) {
+            throw new NotFoundException('Payment not found');
+        }
+
+        return {
+            paymentId: payment._id,
+            currentStatus: payment.status,
+            statusHistory: payment.statusHistory ?? [],
+        };
+    }
+
+
 
     // --------------------------------------------------
     // INQUIRY
