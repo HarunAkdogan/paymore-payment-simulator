@@ -129,7 +129,7 @@ describe('PaymentsService', () => {
         });
     });
 
-    it('ödeme baþarýyla oluþturulmalý', async () => {
+    it('ödeme başarıyla oluşturulmalı', async () => {
         const result = await service.create(dto, 'key-1001');
 
         expect(model.create).toHaveBeenCalled();
@@ -137,7 +137,7 @@ describe('PaymentsService', () => {
         expect(result.status).toBe('SUCCESS');
     });
 
-    it('idempotency key olmadan ödeme oluþturmamalý', async () => {
+    it('idempotency key olmadan ödeme oluşturmamalı', async () => {
         await expect(
             service.create(dto, ''),
         ).rejects.toBeInstanceOf(BadRequestException);
@@ -145,7 +145,7 @@ describe('PaymentsService', () => {
         expect(model.create).not.toHaveBeenCalled();
     });
 
-    it('ayný key farklý istekle kullanýlýrsa hata vermeli', async () => {
+    it('aynı key farklı istekle kullanılırsa hata vermeli', async () => {
         redis.reserveIdempotency.mockResolvedValueOnce('CONFLICT');
 
         await expect(
@@ -155,7 +155,7 @@ describe('PaymentsService', () => {
         expect(model.create).not.toHaveBeenCalled();
     });
 
-    it('Redis kullanýlamýyorsa ödeme oluþturmamalý', async () => {
+    it('Redis kullanılamıyorsa ödeme oluşturmamalı', async () => {
         redis.reserveIdempotency.mockResolvedValueOnce('UNAVAILABLE');
 
         await expect(
@@ -165,7 +165,7 @@ describe('PaymentsService', () => {
         expect(model.create).not.toHaveBeenCalled();
     });
 
-    it('iade tutarý kalan tutarý aþarsa hata vermeli', async () => {
+    it('iade tutarı kalan tutarı aşarsa hata vermeli', async () => {
         model.findOne.mockResolvedValue(payment);
 
         await expect(
@@ -180,7 +180,7 @@ describe('PaymentsService', () => {
         expect(provider.refund).not.toHaveBeenCalled();
     });
 
-    it('baþarýsýz ödeme için iade yapýlmamalý', async () => {
+    it('başarısız ödeme için iade yapılmamalı', async () => {
         model.findOne.mockResolvedValue({
             ...payment,
             status: 'FAILED',
@@ -196,7 +196,7 @@ describe('PaymentsService', () => {
         ).rejects.toBeInstanceOf(ConflictException);
     });
 
-    it('farklý þirketler ayný merchantReference deðerini kullanabilmeli', async () => {
+    it('farklı şirketler aynı merchantReference değerini kullanabilmeli', async () => {
         const companyA = '507f1f77bcf86cd799439012';
         const companyB = '507f1f77bcf86cd799439014';
 
@@ -218,7 +218,7 @@ describe('PaymentsService', () => {
     });
 
 
-    it('provider timeout olursa ödeme UNKNOWN olmalý', async () => {
+    it('provider timeout olursa ödeme UNKNOWN olmalı', async () => {
         provider.sale.mockRejectedValueOnce(
             new Error('Provider timeout'),
         );
@@ -232,11 +232,11 @@ describe('PaymentsService', () => {
         expect(payment.save).toHaveBeenCalledTimes(1);
     });
 
-    it('ayný ödeme isteði tekrar gelirse mevcut ödeme dönmeli', async () => {
+    it('aynı ödeme isteği tekrar gelirse mevcut ödeme dönmeli', async () => {
         const idempotencyKey = 'key-repeat-001';
 
-        // Ýlk istekte ödeme henüz bulunmuyor.
-        // Ýkinci istekte mevcut ödeme bulunuyor.
+        // İlk istekte ödeme henüz bulunmuyor.
+        // İkinci istekte mevcut ödeme bulunuyor.
         model.findOne
             .mockReturnValueOnce({
                 lean: jest.fn().mockResolvedValue(null),
@@ -245,31 +245,31 @@ describe('PaymentsService', () => {
                 lean: jest.fn().mockResolvedValue(payment),
             });
 
-        // Ýlk istek yeni kayýt oluþturur.
-        // Ýkinci istek ayný anahtarýn daha önce kullanýldýðýný görür.
+        // İlk istek yeni kayıt oluşturur.
+        // İkinci istek aynı anahtarın daha önce kullanıldığını görür.
         redis.reserveIdempotency
             .mockResolvedValueOnce('NEW')
             .mockResolvedValueOnce('EXISTS');
 
-        // Ýlk istek
+        // İlk istek
         await service.create(dto, idempotencyKey);
 
-        // Ýkinci, yani tekrarlanan istek
+        // İkinci, yani tekrarlanan istek
         const secondResult = await service.create(dto, idempotencyKey);
 
         expect(secondResult).toEqual(payment);
 
-        // Yalnýzca bir ödeme oluþturulmalý.
+        // Yalnızca bir ödeme oluşturulmalı.
         expect(model.create).toHaveBeenCalledTimes(1);
 
-        // Saðlayýcýya yalnýzca bir kez ödeme isteði gönderilmeli.
+        // Sağlayıcıya yalnızca bir kez ödeme isteği gönderilmeli.
         expect(provider.sale).toHaveBeenCalledTimes(1);
 
-        // Redis'e iki kez kontrol yapýlmalý.
+        // Redis'e iki kez kontrol yapılmalı.
         expect(redis.reserveIdempotency).toHaveBeenCalledTimes(2);
     });
 
-    it('baþarýlý refund iþlemi yapmalý', async () => {
+    it('başarılı refund işlemi yapmalı', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 1000;
@@ -301,14 +301,14 @@ describe('PaymentsService', () => {
         // Ödeme bulundu.
         model.findOne.mockResolvedValue(paymentDocument);
 
-        // Daha önce ayný idempotency key ile refund yapýlmamýþ.
+        // Daha önce aynı idempotency key ile refund yapılmamış.
         refund.findOne.mockResolvedValue(null);
 
-        // Yeni refund kaydý oluþturuldu.
+        // Yeni refund kaydı oluşturuldu.
         refund.create.mockResolvedValue(refundRecord);
 
-        // Ýlk çaðrý: tutar rezerve edildi.
-        // Ýkinci çaðrý: transaction içerisinde ödeme güncellendi.
+        // İlk çağrı: tutar rezerve edildi.
+        // İkinci çağrı: transaction içerisinde ödeme güncellendi.
         model.findOneAndUpdate
             .mockResolvedValueOnce({
                 ...paymentDocument,
@@ -321,19 +321,19 @@ describe('PaymentsService', () => {
                 status: 'PARTIALLY_REFUNDED',
             });
 
-        // Provider iadeyi baþarýlý tamamladý.
+        // Provider iadeyi başarılı tamamladı.
         provider.refund.mockResolvedValue({
             success: true,
             refundedAmount: amount,
             refundReference: 'refund-ref-001',
         });
 
-        // Refund kaydýnýn baþarýlý duruma güncellenmesi.
+        // Refund kaydının başarılı duruma güncellenmesi.
         refund.updateOne.mockResolvedValue({
             matchedCount: 1,
         });
 
-        // Ýþlem sonunda tamamlanmýþ refund kaydý okunacak.
+        // İşlem sonunda tamamlanmış refund kaydı okunacak.
         refund.findById.mockReturnValue({
             lean: jest.fn().mockResolvedValue(completedRefund),
         });
@@ -345,28 +345,28 @@ describe('PaymentsService', () => {
             idempotencyKey,
         );
 
-        // Dönen refund baþarýlý olmalý.
+        // Dönen refund başarılı olmalı.
         expect(result.status).toBe('SUCCESS');
 
-        // Refund kaydý bir kez oluþturulmalý.
+        // Refund kaydı bir kez oluşturulmalı.
         expect(refund.create).toHaveBeenCalledTimes(1);
 
-        // Provider'a bir kez iade isteði gönderilmeli.
+        // Provider'a bir kez iade isteği gönderilmeli.
         expect(provider.refund).toHaveBeenCalledTimes(1);
 
         // Ödeme iki kez güncellenmeli:
-        // 1. Ýade tutarýný rezerve etmek.
-        // 2. Transaction içinde kesin iade tutarýný iþlemek.
+        // 1. İade tutarını rezerve etmek.
+        // 2. Transaction içinde kesin iade tutarını işlemek.
         expect(model.findOneAndUpdate).toHaveBeenCalledTimes(2);
 
-        // MongoDB transaction çalýþmalý.
+        // MongoDB transaction çalışmalı.
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
 
-        // Session kapatýlmalý.
+        // Session kapatılmalı.
         expect(session.endSession).toHaveBeenCalledTimes(1);
     });
 
-    it('ayný refund isteði tekrar gelirse mevcut refund dönmeli', async () => {
+    it('aynı refund isteği tekrar gelirse mevcut refund dönmeli', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 1000;
@@ -398,7 +398,7 @@ describe('PaymentsService', () => {
         // Ödeme MongoDB'de bulundu.
         model.findOne.mockResolvedValueOnce(paymentDocument);
 
-        // Ayný idempotency key ile daha önce baþarýlý refund yapýlmýþ.
+        // Aynı idempotency key ile daha önce başarılı refund yapılmış.
         refund.findOne.mockResolvedValueOnce(existingRefund);
 
         const result = await service.refund(
@@ -412,17 +412,17 @@ describe('PaymentsService', () => {
         expect(result.status).toBe('SUCCESS');
         expect(result.amount).toBe(amount);
 
-        // Yeni refund oluþturulmamalý.
+        // Yeni refund oluşturulmamalı.
         expect(refund.create).not.toHaveBeenCalled();
 
-        // Provider tekrar çaðrýlmamalý.
+        // Provider tekrar çağrılmamalı.
         expect(provider.refund).not.toHaveBeenCalled();
 
-        // Ödeme tutarý yeniden rezerve edilmemeli.
+        // Ödeme tutarı yeniden rezerve edilmemeli.
         expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it('eþzamanlý iki refund isteðinden yalnýzca biri baþarýlý olmalý', async () => {
+    it('eşzamanlı iki refund isteğinden yalnızca biri başarılı olmalı', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 2000;
@@ -436,19 +436,19 @@ describe('PaymentsService', () => {
             providerReference: 'mock-ref',
         };
 
-        // Ýki isteðin de ayný ödemeyi bulmasýný saðla.
+        // İki isteğin de aynı ödemeyi bulmasını sağla.
         model.findOne.mockResolvedValue(paymentDocument);
 
-        // Daha önce bu idempotency key'lerle refund yapýlmamýþ.
+        // Daha önce bu idempotency key'lerle refund yapılmamış.
         refund.findOne.mockResolvedValue(null);
 
-        // Ýki ayrý refund kaydý oluþturulacak.
+        // İki ayrı refund kaydı oluşturulacak.
         refund.create.mockImplementation(async (data: any) => ({
             ...data,
             _id: new Types.ObjectId(),
         }));
 
-        // Provider cevabýný kontrollü þekilde bekletiyoruz.
+        // Provider cevabını kontrollü şekilde bekletiyoruz.
         let resolveProvider: (value: any) => void;
 
         const providerPromise = new Promise<any>((resolve) => {
@@ -457,8 +457,8 @@ describe('PaymentsService', () => {
 
         provider.refund.mockReturnValue(providerPromise);
 
-        // Ýki rezervasyon isteðini simüle et:
-        // Ýlk rezervasyon baþarýlý, ikincisi baþarýsýz.
+        // İki rezervasyon isteğini simüle et:
+        // İlk rezervasyon başarılı, ikincisi başarısız.
         let reservationCount = 0;
 
         model.findOneAndUpdate.mockImplementation(async () => {
@@ -475,7 +475,7 @@ describe('PaymentsService', () => {
                 return null;
             }
 
-            // Ýlk refund'ýn transaction içindeki güncellemesi.
+            // İlk refund'ın transaction içindeki güncellemesi.
             return {
                 ...paymentDocument,
                 refundedAmount: 9000,
@@ -514,10 +514,10 @@ describe('PaymentsService', () => {
             'refund-key-concurrent-002',
         );
 
-        // Ýkinci rezervasyonun baþarýsýz olmasýný bekle.
+        // İkinci rezervasyonun başarısız olmasını bekle.
         await failedReservation;
 
-        // Ýlk provider isteðine baþarýlý cevap ver.
+        // İlk provider isteğine başarılı cevap ver.
         resolveProvider!({
             success: true,
             refundedAmount: amount,
@@ -548,7 +548,7 @@ describe('PaymentsService', () => {
     });
 
 
-    it('provider baþarýlý olsa bile DB transaction baþarýsýzsa refund UNKNOWN olmalý', async () => {
+    it('provider başarılı olsa bile DB transaction başarısızsa refund UNKNOWN olmalı', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 1000;
@@ -575,14 +575,14 @@ describe('PaymentsService', () => {
         // Ödeme bulundu.
         model.findOne.mockResolvedValue(paymentDocument);
 
-        // Daha önce ayný refund yapýlmamýþ.
+        // Daha önce aynı refund yapılmamış.
         refund.findOne.mockResolvedValue(null);
 
-        // Refund kaydý oluþturuldu.
+        // Refund kaydı oluşturuldu.
         refund.create.mockResolvedValue(refundRecord);
 
-        // Ýlk çaðrý: rezervasyon baþarýlý.
-        // Ýkinci çaðrý: transaction sýrasýnda DB güncellemesi baþarýsýz.
+        // İlk çağrı: rezervasyon başarılı.
+        // İkinci çağrı: transaction sırasında DB güncellemesi başarısız.
         model.findOneAndUpdate
             .mockResolvedValueOnce({
                 ...paymentDocument,
@@ -590,7 +590,7 @@ describe('PaymentsService', () => {
             })
             .mockResolvedValueOnce(null);
 
-        // Provider iadeyi baþarýlý gerçekleþtirdi.
+        // Provider iadeyi başarılı gerçekleştirdi.
         provider.refund.mockResolvedValue({
             success: true,
             refundedAmount: amount,
@@ -601,7 +601,7 @@ describe('PaymentsService', () => {
             matchedCount: 1,
         });
 
-        // Ýþlemi gerçekleþtir.
+        // İşlemi gerçekleştir.
         await expect(
             service.refund(
                 paymentId,
@@ -611,13 +611,13 @@ describe('PaymentsService', () => {
             ),
         ).rejects.toBeInstanceOf(ServiceUnavailableException);
 
-        // Provider gerçekten çaðrýlmýþ olmalý.
+        // Provider gerçekten çağrılmış olmalı.
         expect(provider.refund).toHaveBeenCalledTimes(1);
 
-        // Ýlk çaðrý rezervasyon, ikinci çaðrý transaction güncellemesi.
+        // İlk çağrı rezervasyon, ikinci çağrı transaction güncellemesi.
         expect(model.findOneAndUpdate).toHaveBeenCalledTimes(2);
 
-        // Refund UNKNOWN olarak iþaretlenmeli.
+        // Refund UNKNOWN olarak işaretlenmeli.
         expect(refund.updateOne).toHaveBeenCalledWith(
             expect.objectContaining({
                 _id: refundRecord._id,
@@ -631,14 +631,14 @@ describe('PaymentsService', () => {
             }),
         );
 
-        // Transaction çalýþmýþ olmalý.
+        // Transaction çalışmış olmalı.
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
 
-        // Session kapatýlmalý.
+        // Session kapatılmalı.
         expect(session.endSession).toHaveBeenCalledTimes(1);
     });
 
-    it('provider refund iþlemini reddederse refund FAILED olmalý', async () => {
+    it('provider refund işlemini reddederse refund FAILED olmalı', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 1000;
@@ -665,13 +665,13 @@ describe('PaymentsService', () => {
         // Ödeme bulundu.
         model.findOne.mockResolvedValue(paymentDocument);
 
-        // Önceden ayný refund yapýlmamýþ.
+        // Önceden aynı refund yapılmamış.
         refund.findOne.mockResolvedValue(null);
 
-        // Refund kaydý oluþturuldu.
+        // Refund kaydı oluşturuldu.
         refund.create.mockResolvedValue(refundRecord);
 
-        // Ýade tutarý rezerve edildi.
+        // İade tutarı rezerve edildi.
         model.findOneAndUpdate.mockResolvedValueOnce({
             ...paymentDocument,
             refundPendingAmount: amount,
@@ -696,10 +696,10 @@ describe('PaymentsService', () => {
             ),
         ).rejects.toBeInstanceOf(ConflictException);
 
-        // Provider bir kez çaðrýldý.
+        // Provider bir kez çağrıldı.
         expect(provider.refund).toHaveBeenCalledTimes(1);
 
-        // Refund FAILED yapýlmalý.
+        // Refund FAILED yapılmalı.
         expect(refund.updateOne).toHaveBeenCalledWith(
             { _id: refundRecord._id },
             {
@@ -710,7 +710,7 @@ describe('PaymentsService', () => {
             },
         );
 
-        // Rezervasyon geri alýnmalý.
+        // Rezervasyon geri alınmalı.
         expect(model.updateOne).toHaveBeenCalledWith(
             {
                 _id: expect.any(Types.ObjectId),
@@ -723,12 +723,12 @@ describe('PaymentsService', () => {
             },
         );
 
-        // Transaction baþlatýlmamalý.
+        // Transaction başlatılmamalı.
         expect(session.withTransaction).not.toHaveBeenCalled();
     });
 
-    it('baþka firmaya ait terminal kullanýlýrsa ödeme reddedilmeli', async () => {
-        // Terminal bu firmaya ait olmadýðý için bulunamýyor.
+    it('başka firmaya ait terminal kullanılırsa ödeme reddedilmeli', async () => {
+        // Terminal bu firmaya ait olmadığı için bulunamıyor.
         terminals.findOne.mockReturnValueOnce({
             lean: jest.fn().mockResolvedValue(null),
         });
@@ -744,7 +744,7 @@ describe('PaymentsService', () => {
             isActive: true,
         });
 
-        // Ödeme oluþturulmamalý.
+        // Ödeme oluşturulmamalı.
         expect(model.create).not.toHaveBeenCalled();
 
         // Provider'a istek gönderilmemeli.
@@ -754,7 +754,7 @@ describe('PaymentsService', () => {
         expect(redis.reserveIdempotency).not.toHaveBeenCalled();
     });
 
-    it('backend yeniden baþladýktan sonra yarým kalan refund tekrar gönderilmemeli', async () => {
+    it('backend yeniden başladıktan sonra yarım kalan refund tekrar gönderilmemeli', async () => {
         const paymentId = payment._id;
         const companyId = payment.companyId.toString();
         const amount = 1000;
@@ -772,7 +772,7 @@ describe('PaymentsService', () => {
         // MongoDB'de ödeme hâlâ mevcut.
         model.findOne.mockResolvedValueOnce(paymentDocument);
 
-        // Önceki backend çalýþmasýndan kalan refund kaydý.
+        // Önceki backend çalışmasından kalan refund kaydı.
         const existingRefund = {
             _id: new Types.ObjectId(),
             paymentId: new Types.ObjectId(paymentId),
@@ -793,13 +793,13 @@ describe('PaymentsService', () => {
             ),
         ).rejects.toBeInstanceOf(ConflictException);
 
-        // Yeni refund kaydý oluþturulmamalý.
+        // Yeni refund kaydı oluşturulmamalı.
         expect(refund.create).not.toHaveBeenCalled();
 
-        // Provider'a tekrar iade isteði gönderilmemeli.
+        // Provider'a tekrar iade isteği gönderilmemeli.
         expect(provider.refund).not.toHaveBeenCalled();
 
-        // Yeni rezervasyon yapýlmamalý.
+        // Yeni rezervasyon yapılmamalı.
         expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
