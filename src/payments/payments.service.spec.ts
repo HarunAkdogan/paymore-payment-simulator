@@ -117,6 +117,14 @@ describe('PaymentsService', () => {
         payment.refundPendingAmount = 0;
         payment.status = 'SUCCESS';
         payment.providerReference = 'mock-ref';
+        payment.requestFingerprint = JSON.stringify({
+            companyId: dto.companyId,
+            terminalId: dto.terminalId,
+            amount: dto.amount,
+            currency: dto.currency,
+            merchantReference: dto.merchantReference,
+            scenario: dto.scenario,
+        });
 
         payment.save.mockResolvedValue(payment);
         payment.toObject.mockReturnValue(payment);
