@@ -57,7 +57,7 @@ export class PaymentsService {
         if (payment.statusHistory.length === 0) {
             payment.statusHistory.push({
                 status: payment.status,
-                changedAt: payment.createdAt ?? new Date(),
+                changedAt: (payment as any).createdAt ?? new Date(),
             } as any);
         }
 
@@ -399,7 +399,7 @@ export class PaymentsService {
                 if (existingHistory.length === 0) {
                     statusHistoryEntries.push({
                         status: payment.status,
-                        changedAt: payment.createdAt ?? new Date(),
+                        changedAt: (payment as any).createdAt ?? new Date(),
                     });
                 }
 
@@ -1156,7 +1156,7 @@ export class PaymentsService {
                 if (!current.statusHistory?.length) {
                     historyEntries.push({
                         status: current.status,
-                        changedAt: current.createdAt ?? new Date(),
+                        changedAt: (current as any).createdAt ?? new Date(),
                     });
                 }
 
