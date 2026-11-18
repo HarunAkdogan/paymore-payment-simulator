@@ -41,6 +41,39 @@ export class PaymentsService {
 
     private readonly logger = new Logger(PaymentsService.name);
 
+    /**
+     * Keeps the payment's status history in sync with its current status.
+     * For older documents without history, the current status is used as
+     * the first history entry before recording the transition.
+     */
+    private recordStatusChange(
+        payment: PaymentDocument,
+        newStatus: PaymentStatus,
+    ): void {
+        if (!payment.statusHistory) {
+            payment.statusHistory = [] as any;
+        }
+
+        if (payment.statusHistory.length === 0) {
+            payment.statusHistory.push({
+                status: payment.status,
+                changedAt: payment.createdAt ?? new Date(),
+            } as any);
+        }
+
+        const lastEntry =
+            payment.statusHistory[payment.statusHistory.length - 1];
+
+        if (lastEntry.status !== newStatus) {
+            payment.statusHistory.push({
+                status: newStatus,
+                changedAt: new Date(),
+            } as any);
+        }
+
+        payment.status = newStatus;
+    }
+
     constructor(
        
 
@@ -153,6 +186,12 @@ export class PaymentsService {
                 idempotencyKey,
                 requestFingerprint: fingerprint,
                 status: PaymentStatus.PENDING,
+                statusHistory: [
+                    {
+                        status: PaymentStatus.PENDING,
+                        changedAt: new Date(),
+                    },
+                ],
             });
         } catch (error) {
             if (
@@ -195,7 +234,7 @@ export class PaymentsService {
                 scenario: dto.scenario,
             });
         } catch (error) {
-            payment.status = PaymentStatus.UNKNOWN;
+            this.recordStatusChange(payment, PaymentStatus.UNKNOWN);
             payment.failureReason = 'Provider outcome unknown';
 
             await payment.save();
@@ -205,7 +244,10 @@ export class PaymentsService {
             );
         }
 
-        payment.status = result.status as PaymentStatus;
+        this.recordStatusChange(
+            payment,
+            result.status as PaymentStatus,
+        );
         payment.providerReference = result.providerReference;
         payment.failureReason = result.reason;
 
@@ -346,16 +388,48 @@ export class PaymentsService {
                     setFields.failureReason = null;
                 }
 
+                const statusHistoryEntries: Array<{
+                    status: PaymentStatus;
+                    changedAt: Date;
+                }> = [];
+
+                const existingHistory = payment.statusHistory ?? [];
+
+                // Seed history for payments created before status history existed.
+                if (existingHistory.length === 0) {
+                    statusHistoryEntries.push({
+                        status: payment.status,
+                        changedAt: payment.createdAt ?? new Date(),
+                    });
+                }
+
+                if (payment.status !== result.status) {
+                    statusHistoryEntries.push({
+                        status: result.status as PaymentStatus,
+                        changedAt: new Date(),
+                    });
+                }
+
+                const update: Record<string, any> = {
+                    $set: setFields,
+                    $inc: { inquiryAttempts: 1 },
+                };
+
+                if (statusHistoryEntries.length > 0) {
+                    update.$push = {
+                        statusHistory: {
+                            $each: statusHistoryEntries,
+                        },
+                    };
+                }
+
                 state.updated = await this.payments.findOneAndUpdate(
                     {
                         _id: payment._id,
                         companyId: new Types.ObjectId(companyId),
                         status: payment.status,
                     },
-                    {
-                        $set: setFields,
-                        $inc: { inquiryAttempts: 1 },
-                    },
+                    update,
                     {
                         new: true,
                         session,
@@ -461,7 +535,7 @@ export class PaymentsService {
             );
         }
 
-        payment.status = PaymentStatus.VOIDED;
+        this.recordStatusChange(payment, PaymentStatus.VOIDED);
 
         await payment.save();
 
@@ -789,6 +863,74 @@ export class PaymentsService {
                                         PaymentStatus.PARTIALLY_REFUNDED,
                                     ],
                                 },
+                                statusHistory: {
+                                    $let: {
+                                        vars: {
+                                            nextStatus: {
+                                                $cond: [
+                                                    {
+                                                        $eq: [
+                                                            {
+                                                                $add: [
+                                                                    { $ifNull: ['$refundedAmount', 0] },
+                                                                    amount,
+                                                                ],
+                                                            },
+                                                            '$amount',
+                                                        ],
+                                                    },
+                                                    PaymentStatus.REFUNDED,
+                                                    PaymentStatus.PARTIALLY_REFUNDED,
+                                                ],
+                                            },
+                                            currentHistory: {
+                                                $ifNull: ['$statusHistory', []],
+                                            },
+                                        },
+                                        in: {
+                                            $let: {
+                                                vars: {
+                                                    baseHistory: {
+                                                        $cond: [
+                                                            {
+                                                                $gt: [
+                                                                    { $size: '$currentHistory' },
+                                                                    0,
+                                                                ],
+                                                            },
+                                                            '$currentHistory',
+                                                            [
+                                                                {
+                                                                    status: '$status',
+                                                                    changedAt: {
+                                                                        $ifNull: ['$createdAt', '$NOW'],
+                                                                    },
+                                                                },
+                                                            ],
+                                                        ],
+                                                    },
+                                                },
+                                                in: {
+                                                    $cond: [
+                                                        { $eq: ['$status', '$nextStatus'] },
+                                                        '$baseHistory',
+                                                        {
+                                                            $concatArrays: [
+                                                                '$baseHistory',
+                                                                [
+                                                                    {
+                                                                        status: '$nextStatus',
+                                                                        changedAt: '$NOW',
+                                                                    },
+                                                                ],
+                                                            ],
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
                             },
                         },
                     ],
@@ -941,7 +1083,7 @@ export class PaymentsService {
                     _id: new Types.ObjectId(paymentId),
                     terminalId: new Types.ObjectId(terminalId),
                 })
-                .select('status processedMqttMessageIds')
+                .select('status processedMqttMessageIds statusHistory createdAt')
                 .lean();
 
             if (!current) {
@@ -997,15 +1139,42 @@ export class PaymentsService {
 
             }
 
-            const update = {
+            const update: Record<string, any> = {
                 $addToSet: {
                     processedMqttMessageIds: messageId,
                 },
-
-                ...(result === 'UPDATED' && targetStatus
-                    ? { $set: { status: targetStatus } }
-                    : {}),
             };
+
+            if (result === 'UPDATED' && targetStatus) {
+                update.$set = { status: targetStatus };
+
+                const historyEntries: Array<{
+                    status: PaymentStatus;
+                    changedAt: Date;
+                }> = [];
+
+                if (!current.statusHistory?.length) {
+                    historyEntries.push({
+                        status: current.status,
+                        changedAt: current.createdAt ?? new Date(),
+                    });
+                }
+
+                if (current.status !== targetStatus) {
+                    historyEntries.push({
+                        status: targetStatus,
+                        changedAt: new Date(),
+                    });
+                }
+
+                if (historyEntries.length > 0) {
+                    update.$push = {
+                        statusHistory: {
+                            $each: historyEntries,
+                        },
+                    };
+                }
+            }
 
             const updated = await this.payments.findOneAndUpdate(
                 {
