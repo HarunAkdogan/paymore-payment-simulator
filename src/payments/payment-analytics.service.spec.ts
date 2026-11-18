@@ -94,10 +94,6 @@ describe('PaymentAnalyticsService Mock', () => {
     });
 
 
-
-
-
-
     it('þirket ödeme sayýsýný vermeli', async () => {
 
         const companyId = '6af587d512a1a510cc29b724';
@@ -113,4 +109,7 @@ describe('PaymentAnalyticsService Mock', () => {
         expect(result).toBe(8);
 
     });
+
+
+
 });

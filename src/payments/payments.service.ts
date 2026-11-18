@@ -41,6 +41,39 @@ export class PaymentsService {
 
     private readonly logger = new Logger(PaymentsService.name);
 
+    /**
+     * Keeps the payment's status history in sync with its current status.
+     * For older documents without history, the current status is used as
+     * the first history entry before recording the transition.
+     */
+    private recordStatusChange(
+        payment: PaymentDocument,
+        newStatus: PaymentStatus,
+    ): void {
+        if (!payment.statusHistory) {
+            payment.statusHistory = [] as any;
+        }
+
+        if (payment.statusHistory.length === 0) {
+            payment.statusHistory.push({
+                status: payment.status,
+                changedAt: (payment as any).createdAt ?? new Date(),
+            } as any);
+        }
+
+        const lastEntry =
+            payment.statusHistory[payment.statusHistory.length - 1];
+
+        if (lastEntry.status !== newStatus) {
+            payment.statusHistory.push({
+                status: newStatus,
+                changedAt: new Date(),
+            } as any);
+        }
+
+        payment.status = newStatus;
+    }
+
     constructor(
        
 
@@ -103,6 +136,46 @@ export class PaymentsService {
             scenario: dto.scenario,
         });
 
+        // Redis prevents duplicate requests from reaching MongoDB and the provider.
+        const reservation = await this.redis.reserveIdempotency(
+            `payment:${dto.companyId}:${idempotencyKey}`,
+            fingerprint,
+            86400,
+        );
+
+        if (reservation === 'CONFLICT') {
+            throw new ConflictException(
+                'Idempotency key was already used with a different request',
+            );
+        }
+
+        if (reservation === 'UNAVAILABLE') {
+            throw new ServiceUnavailableException(
+                'Idempotency store unavailable; retry safely with the same key',
+            );
+        }
+
+        if (reservation === 'EXISTS') {
+            const existing = await this.payments.findOne({
+                companyId: new Types.ObjectId(dto.companyId),
+                idempotencyKey,
+            }).lean();
+
+            if (existing) {
+                if (existing.requestFingerprint !== fingerprint) {
+                    throw new ConflictException(
+                        'Idempotency key was already used with a different request',
+                    );
+                }
+
+                return existing;
+            }
+
+            throw new ConflictException(
+                'Request with this idempotency key is already being processed',
+            );
+        }
+
         let payment: PaymentDocument;
 
         try {
@@ -113,6 +186,12 @@ export class PaymentsService {
                 idempotencyKey,
                 requestFingerprint: fingerprint,
                 status: PaymentStatus.PENDING,
+                statusHistory: [
+                    {
+                        status: PaymentStatus.PENDING,
+                        changedAt: new Date(),
+                    },
+                ],
             });
         } catch (error) {
             if (
@@ -155,7 +234,7 @@ export class PaymentsService {
                 scenario: dto.scenario,
             });
         } catch (error) {
-            payment.status = PaymentStatus.UNKNOWN;
+            this.recordStatusChange(payment, PaymentStatus.UNKNOWN);
             payment.failureReason = 'Provider outcome unknown';
 
             await payment.save();
@@ -165,7 +244,10 @@ export class PaymentsService {
             );
         }
 
-        payment.status = result.status as PaymentStatus;
+        this.recordStatusChange(
+            payment,
+            result.status as PaymentStatus,
+        );
         payment.providerReference = result.providerReference;
         payment.failureReason = result.reason;
 
@@ -246,6 +328,40 @@ export class PaymentsService {
         return payment;
     }
 
+    // --------------------------------------------------
+    // GET STATUS HISTORY
+    // --------------------------------------------------
+
+
+
+    async getStatusHistory(id: string, companyId: string) {
+        if (
+            !Types.ObjectId.isValid(id) ||
+            !Types.ObjectId.isValid(companyId)
+        ) {
+            throw new NotFoundException('Payment not found');
+        }
+
+        const payment = await this.payments
+            .findOne({
+                _id: new Types.ObjectId(id),
+                companyId: new Types.ObjectId(companyId),
+            })
+            .select('_id status statusHistory createdAt')
+            .lean();
+
+        if (!payment) {
+            throw new NotFoundException('Payment not found');
+        }
+
+        return {
+            paymentId: payment._id,
+            currentStatus: payment.status,
+            statusHistory: payment.statusHistory ?? [],
+        };
+    }
+
+
 
     // --------------------------------------------------
     // INQUIRY
@@ -277,7 +393,7 @@ export class PaymentsService {
             return payment.toObject();
         }
 
-        // Provider'dan güncel sonucu öðren.
+        // Provider'dan gÃ¼ncel sonucu Ã¶ÄŸren.
         const result = await this.provider.inquiry(
             payment.companyId.toString(),
             payment.merchantReference,
@@ -306,28 +422,60 @@ export class PaymentsService {
                     setFields.failureReason = null;
                 }
 
+                const statusHistoryEntries: Array<{
+                    status: PaymentStatus;
+                    changedAt: Date;
+                }> = [];
+
+                const existingHistory = payment.statusHistory ?? [];
+
+                // Seed history for payments created before status history existed.
+                if (existingHistory.length === 0) {
+                    statusHistoryEntries.push({
+                        status: payment.status,
+                        changedAt: (payment as any).createdAt ?? new Date(),
+                    });
+                }
+
+                if (payment.status !== result.status) {
+                    statusHistoryEntries.push({
+                        status: result.status as PaymentStatus,
+                        changedAt: new Date(),
+                    });
+                }
+
+                const update: Record<string, any> = {
+                    $set: setFields,
+                    $inc: { inquiryAttempts: 1 },
+                };
+
+                if (statusHistoryEntries.length > 0) {
+                    update.$push = {
+                        statusHistory: {
+                            $each: statusHistoryEntries,
+                        },
+                    };
+                }
+
                 state.updated = await this.payments.findOneAndUpdate(
                     {
                         _id: payment._id,
                         companyId: new Types.ObjectId(companyId),
                         status: payment.status,
                     },
-                    {
-                        $set: setFields,
-                        $inc: { inquiryAttempts: 1 },
-                    },
+                    update,
                     {
                         new: true,
                         session,
                     },
                 );
 
-                // Baþka bir iþlem ödeme durumunu deðiþtirmiþ.
+                // BaÅŸka bir iÅŸlem Ã¶deme durumunu deÄŸiÅŸtirmiÅŸ.
                 if (!state.updated) {
                     return;
                 }
 
-                // Baþarýlý ödeme için Outbox event oluþtur.
+                // BaÅŸarÄ±lÄ± Ã¶deme iÃ§in Outbox event oluÅŸtur.
                 if (result.status === 'SUCCESS') {
                     const event = {
                         eventId: randomUUID(),
@@ -421,7 +569,7 @@ export class PaymentsService {
             );
         }
 
-        payment.status = PaymentStatus.VOIDED;
+        this.recordStatusChange(payment, PaymentStatus.VOIDED);
 
         await payment.save();
 
@@ -475,6 +623,38 @@ export class PaymentsService {
             throw new NotFoundException('Payment not found');
         }
 
+        // Check idempotency before payment status and remaining-balance checks.
+        // A retry of a completed full refund must return the original result.
+        const existingRefund = await this.refunds.findOne({
+            companyId: companyObjectId,
+            idempotencyKey,
+        });
+
+        if (existingRefund) {
+            if (
+                existingRefund.paymentId.toString() !== id ||
+                existingRefund.amount !== amount
+            ) {
+                throw new ConflictException(
+                    'Idempotency key already used with different parameters',
+                );
+            }
+
+            if (existingRefund.status === RefundStatus.SUCCESS) {
+                return existingRefund.toObject();
+            }
+
+            if (existingRefund.status === RefundStatus.FAILED) {
+                throw new ConflictException(
+                    'This refund request has already failed',
+                );
+            }
+
+            throw new ConflictException(
+                'Refund is already being processed or requires reconciliation',
+            );
+        }
+
         if (
             payment.status !== PaymentStatus.SUCCESS &&
             payment.status !== PaymentStatus.PARTIALLY_REFUNDED
@@ -501,39 +681,7 @@ export class PaymentsService {
             );
         }
 
-        // Ayný idempotency key daha önce kullanýlmýþ mý?
-        const existingRefund = await this.refunds.findOne({
-            companyId: companyObjectId,
-            idempotencyKey,
-        });
-
-        if (existingRefund) {
-
-            if (
-                existingRefund.paymentId.toString() !== id ||
-                existingRefund.amount !== amount
-            ) {
-                throw new ConflictException(
-                    'Idempotency key already used with different parameters',
-                );
-            }
-
-            if (existingRefund.status === RefundStatus.SUCCESS) {
-                return existingRefund.toObject();
-            }
-
-            if (existingRefund.status === RefundStatus.FAILED) {
-                throw new ConflictException(
-                    'This refund request has already failed',
-                );
-            }
-
-            throw new ConflictException(
-                'Refund is already being processed or requires reconciliation',
-            );
-        }
-
-        // Refund kaydýný oluþtur.
+        // Refund kaydÄ±nÄ± oluÅŸtur.
         let refundRecord: RefundDocument;
 
         try {
@@ -562,7 +710,7 @@ export class PaymentsService {
             throw error;
         }
 
-        // Ýade tutarýný atomik þekilde rezerve et.
+        // Ä°ade tutarÄ±nÄ± atomik ÅŸekilde rezerve et.
         const reservedPayment = await this.payments.findOneAndUpdate(
             {
                 _id: paymentId,
@@ -613,7 +761,7 @@ export class PaymentsService {
             );
         }
 
-        // Provider'a idempotency key ile istek gönder.
+        // Provider'a idempotency key ile istek gÃ¶nder.
         let result: {
             success: boolean;
             refundedAmount: number;
@@ -630,7 +778,7 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Sonuç belirsiz. Rezervasyonu serbest býrakmýyoruz.
+            // SonuÃ§ belirsiz. Rezervasyonu serbest bÄ±rakmÄ±yoruz.
             await this.refunds.updateOne(
                 { _id: refundRecord._id },
                 {
@@ -681,7 +829,7 @@ export class PaymentsService {
             );
         }
 
-        // Provider baþarýlý dedi ama beklenmeyen sonuç döndürdü.
+        // Provider baÅŸarÄ±lÄ± dedi ama beklenmeyen sonuÃ§ dÃ¶ndÃ¼rdÃ¼.
         if (
             result.refundedAmount !== amount ||
             !result.refundReference
@@ -702,12 +850,48 @@ export class PaymentsService {
             );
         }
 
-        // Payment ve Refund güncellemelerini tek transaction içinde yap.
+        // Payment ve Refund gÃ¼ncellemelerini tek transaction iÃ§inde yap.
         const session = await this.payments.db.startSession();
 
         try {
 
             await session.withTransaction(async () => {
+
+                const historyTimestamp = new Date();
+                const nextPaymentStatus = {
+                    $cond: [
+                        {
+                            $eq: [
+                                {
+                                    $add: [
+                                        { $ifNull: ['$refundedAmount', 0] },
+                                        amount,
+                                    ],
+                                },
+                                '$amount',
+                            ],
+                        },
+                        PaymentStatus.REFUNDED,
+                        PaymentStatus.PARTIALLY_REFUNDED,
+                    ],
+                };
+                const currentHistory = {
+                    $ifNull: ['$statusHistory', []],
+                };
+                const baseHistory = {
+                    $cond: [
+                        { $gt: [{ $size: currentHistory }, 0] },
+                        currentHistory,
+                        [
+                            {
+                                status: '$status',
+                                changedAt: {
+                                    $ifNull: ['$createdAt', historyTimestamp],
+                                },
+                            },
+                        ],
+                    ],
+                };
 
                 const updatedPayment = await this.payments.findOneAndUpdate(
                     {
@@ -732,21 +916,22 @@ export class PaymentsService {
                                     ],
                                 },
 
-                                status: {
+                                status: nextPaymentStatus,
+                                statusHistory: {
                                     $cond: [
+                                        { $eq: ['$status', nextPaymentStatus] },
+                                        baseHistory,
                                         {
-                                            $eq: [
-                                                {
-                                                    $add: [
-                                                        { $ifNull: ['$refundedAmount', 0] },
-                                                        amount,
-                                                    ],
-                                                },
-                                                '$amount',
+                                            $concatArrays: [
+                                                baseHistory,
+                                                [
+                                                    {
+                                                        status: nextPaymentStatus,
+                                                        changedAt: historyTimestamp,
+                                                    },
+                                                ],
                                             ],
                                         },
-                                        PaymentStatus.REFUNDED,
-                                        PaymentStatus.PARTIALLY_REFUNDED,
                                     ],
                                 },
                             },
@@ -791,8 +976,8 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Provider baþarýlý olmuþ olabilir.
-            // Rezervasyonu serbest býrakmýyoruz.
+            // Provider baÅŸarÄ±lÄ± olmuÅŸ olabilir.
+            // Rezervasyonu serbest bÄ±rakmÄ±yoruz.
             await this.refunds.updateOne(
                 {
                     _id: refundRecord._id,
@@ -901,7 +1086,7 @@ export class PaymentsService {
                     _id: new Types.ObjectId(paymentId),
                     terminalId: new Types.ObjectId(terminalId),
                 })
-                .select('status processedMqttMessageIds')
+                .select('status processedMqttMessageIds statusHistory createdAt')
                 .lean();
 
             if (!current) {
@@ -957,15 +1142,42 @@ export class PaymentsService {
 
             }
 
-            const update = {
+            const update: Record<string, any> = {
                 $addToSet: {
                     processedMqttMessageIds: messageId,
                 },
-
-                ...(result === 'UPDATED' && targetStatus
-                    ? { $set: { status: targetStatus } }
-                    : {}),
             };
+
+            if (result === 'UPDATED' && targetStatus) {
+                update.$set = { status: targetStatus };
+
+                const historyEntries: Array<{
+                    status: PaymentStatus;
+                    changedAt: Date;
+                }> = [];
+
+                if (!current.statusHistory?.length) {
+                    historyEntries.push({
+                        status: current.status,
+                        changedAt: (current as any).createdAt ?? new Date(),
+                    });
+                }
+
+                if (current.status !== targetStatus) {
+                    historyEntries.push({
+                        status: targetStatus,
+                        changedAt: new Date(),
+                    });
+                }
+
+                if (historyEntries.length > 0) {
+                    update.$push = {
+                        statusHistory: {
+                            $each: historyEntries,
+                        },
+                    };
+                }
+            }
 
             const updated = await this.payments.findOneAndUpdate(
                 {
