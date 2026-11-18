@@ -235,15 +235,10 @@ describe('PaymentsService', () => {
     it('aynı ödeme isteği tekrar gelirse mevcut ödeme dönmeli', async () => {
         const idempotencyKey = 'key-repeat-001';
 
-        // İlk istekte ödeme henüz bulunmuyor.
-        // İkinci istekte mevcut ödeme bulunuyor.
-        model.findOne
-            .mockReturnValueOnce({
-                lean: jest.fn().mockResolvedValue(null),
-            })
-            .mockReturnValueOnce({
-                lean: jest.fn().mockResolvedValue(payment),
-            });
+        // Redis EXISTS sonucunda mevcut ödeme MongoDB'den okunur.
+        model.findOne.mockReturnValueOnce({
+            lean: jest.fn().mockResolvedValue(payment),
+        });
 
         // İlk istek yeni kayıt oluşturur.
         // İkinci istek aynı anahtarın daha önce kullanıldığını görür.
