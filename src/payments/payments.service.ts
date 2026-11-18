@@ -317,7 +317,7 @@ export class PaymentsService {
             return payment.toObject();
         }
 
-        // Provider'dan güncel sonucu öðren.
+        // Provider'dan güncel sonucu öğren.
         const result = await this.provider.inquiry(
             payment.companyId.toString(),
             payment.merchantReference,
@@ -362,12 +362,12 @@ export class PaymentsService {
                     },
                 );
 
-                // Baþka bir iþlem ödeme durumunu deðiþtirmiþ.
+                // Başka bir işlem ödeme durumunu değiştirmiş.
                 if (!state.updated) {
                     return;
                 }
 
-                // Baþarýlý ödeme için Outbox event oluþtur.
+                // Başarılı ödeme için Outbox event oluştur.
                 if (result.status === 'SUCCESS') {
                     const event = {
                         eventId: randomUUID(),
@@ -573,7 +573,7 @@ export class PaymentsService {
             );
         }
 
-        // Refund kaydýný oluþtur.
+        // Refund kaydını oluştur.
         let refundRecord: RefundDocument;
 
         try {
@@ -602,7 +602,7 @@ export class PaymentsService {
             throw error;
         }
 
-        // Ýade tutarýný atomik þekilde rezerve et.
+        // İade tutarını atomik şekilde rezerve et.
         const reservedPayment = await this.payments.findOneAndUpdate(
             {
                 _id: paymentId,
@@ -670,7 +670,7 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Sonuç belirsiz. Rezervasyonu serbest býrakmýyoruz.
+            // Sonuç belirsiz. Rezervasyonu serbest bırakmıyoruz.
             await this.refunds.updateOne(
                 { _id: refundRecord._id },
                 {
@@ -721,7 +721,7 @@ export class PaymentsService {
             );
         }
 
-        // Provider baþarýlý dedi ama beklenmeyen sonuç döndürdü.
+        // Provider başarılı dedi ama beklenmeyen sonuç döndürdü.
         if (
             result.refundedAmount !== amount ||
             !result.refundReference
@@ -831,8 +831,8 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Provider baþarýlý olmuþ olabilir.
-            // Rezervasyonu serbest býrakmýyoruz.
+            // Provider başarılı olmuş olabilir.
+            // Rezervasyonu serbest bırakmıyoruz.
             await this.refunds.updateOne(
                 {
                     _id: refundRecord._id,
