@@ -3,6 +3,18 @@ import { HydratedDocument, Types } from 'mongoose';
 
 export type PaymentDocument = HydratedDocument<Payment>;
 export enum PaymentStatus { CREATED = 'CREATED', PENDING = 'PENDING', SUCCESS = 'SUCCESS', FAILED = 'FAILED', UNKNOWN = 'UNKNOWN', VOIDED = 'VOIDED', PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED', REFUNDED = 'REFUNDED' }
+
+@Schema({ _id: false })
+export class PaymentStatusHistoryEntry {
+    @Prop({ type: String, enum: PaymentStatus, required: true })
+    status!: PaymentStatus;
+
+    @Prop({ type: Date, required: true, default: Date.now })
+    changedAt!: Date;
+}
+
+export const PaymentStatusHistoryEntrySchema =
+    SchemaFactory.createForClass(PaymentStatusHistoryEntry);
 @Schema({ timestamps: true })
 export class Payment {
     @Prop({ type: [String], default: [] })
@@ -17,6 +29,8 @@ export class Payment {
     amount!: number; // minor units: 100 = 1.00 TRY
     @Prop({ required: true, default: 'TRY' }) currency!: string;
     @Prop({ enum: PaymentStatus, default: PaymentStatus.CREATED, index: true }) status!: PaymentStatus;
+    @Prop({ type: [PaymentStatusHistoryEntrySchema], default: [] })
+    statusHistory!: PaymentStatusHistoryEntry[];
     @Prop() providerReference?: string;
     @Prop({ default: 0, min: 0 })
     refundedAmount!: number;
