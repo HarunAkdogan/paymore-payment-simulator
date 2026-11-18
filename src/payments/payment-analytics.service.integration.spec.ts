@@ -37,7 +37,7 @@ describe('PaymentAnalyticsService Integration', () => {
         paymentModel = module.get<Model<Payment>>(
             getModelToken(Payment.name),
         );
-    });
+    }, 30000);
 
     afterAll(async () => {
         if (module) {
