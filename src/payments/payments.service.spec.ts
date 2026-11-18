@@ -19,6 +19,7 @@ describe('PaymentsService', () => {
         refundedAmount: 7000,
         refundPendingAmount: 0,
         requestFingerprint: '',
+        statusHistory: [] as any[],
         status: 'SUCCESS',
         merchantReference: 'ORDER-1001',
         providerReference: 'mock-ref',
