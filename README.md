@@ -96,11 +96,24 @@ Provider semantics differ. In a real integration, distinguish authorization from
 - This simulator's provider keeps outcomes in memory; restarting the app clears provider history. It is for demonstration only.
 
 ## Tests
+
+Start the MongoDB replica set used by the integration test:
+
+```bash
+docker compose up -d mongodb
+docker compose exec mongodb mongosh --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+```
+
+The replica-set initialization command is needed only once for a fresh MongoDB data volume. If it reports that the replica set is already initialized, continue.
+
+Then run:
+
 ```bash
 npm test
 npm run test:e2e
 ```
-The unit tests cover refund validation. The E2E smoke test covers the health endpoint. Extend with database-backed payment lifecycle tests before treating this as a complete production test suite.
+
+`npm test` runs both unit and MongoDB-backed integration tests. The integration test uses `MONGODB_TEST_URI` when set; otherwise it defaults to `mongodb://127.0.0.1:27017/paymore_test?replicaSet=rs0`. The separate `npm run test:integration` command runs only the integration suite.
 
 ## Day-by-day deliverables mapping
 | Day | Deliverable in this repository |
