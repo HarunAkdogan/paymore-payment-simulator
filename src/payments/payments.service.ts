@@ -42,6 +42,8 @@ export class PaymentsService {
     private readonly logger = new Logger(PaymentsService.name);
 
     constructor(
+       
+
         @InjectModel(Payment.name)
         private readonly payments: Model<PaymentDocument>,
 
@@ -92,74 +94,48 @@ export class PaymentsService {
                 'Active terminal not found for this company',
             );
         }
-
-        const fingerprint =
-            `${dto.companyId}:${dto.terminalId}:${dto.amount}:${dto.currency}:${dto.merchantReference}`;
-
-        const reservation = await this.redis.reserveIdempotency(
-            idempotencyKey,
-            fingerprint,
-            86400,
-        );
-
-        if (reservation === 'CONFLICT') {
-            throw new ConflictException(
-                'Idempotency key was already used with a different request',
-            );
-        }
-
-        if (reservation === 'EXISTS') {
-
-            const existing = await this.payments.findOne({
-                companyId: new Types.ObjectId(dto.companyId),
-                merchantReference: dto.merchantReference,
-            }).lean();
-
-            if (existing) {
-                return existing;
-            }
-
-            throw new ConflictException(
-                'Request with this idempotency key is already being processed',
-            );
-        }
-
-        if (reservation === 'UNAVAILABLE') {
-            throw new ServiceUnavailableException(
-                'Idempotency store unavailable; retry safely with the same key',
-            );
-        }
-
-        const existingReference = await this.payments.findOne({
-            companyId: new Types.ObjectId(dto.companyId),
+        const fingerprint = JSON.stringify({
+            companyId: dto.companyId,
+            terminalId: dto.terminalId,
+            amount: dto.amount,
+            currency: dto.currency,
             merchantReference: dto.merchantReference,
-        }).lean();
-
-        if (existingReference) {
-            throw new ConflictException(
-                'merchantReference already exists',
-            );
-        }
+            scenario: dto.scenario,
+        });
 
         let payment: PaymentDocument;
 
         try {
-
             payment = await this.payments.create({
                 ...dto,
                 companyId: new Types.ObjectId(dto.companyId),
                 terminalId: new Types.ObjectId(dto.terminalId),
+                idempotencyKey,
+                requestFingerprint: fingerprint,
                 status: PaymentStatus.PENDING,
             });
-
         } catch (error) {
-
             if (
                 typeof error === 'object' &&
                 error !== null &&
                 'code' in error &&
                 error.code === 11000
             ) {
+                const existing = await this.payments.findOne({
+                    companyId: new Types.ObjectId(dto.companyId),
+                    idempotencyKey,
+                }).lean();
+
+                if (existing) {
+                    if (existing.requestFingerprint !== fingerprint) {
+                        throw new ConflictException(
+                            'Idempotency key was already used with a different request',
+                        );
+                    }
+
+                    return existing;
+                }
+
                 throw new ConflictException(
                     'merchantReference already exists',
                 );
@@ -167,13 +143,27 @@ export class PaymentsService {
 
             throw error;
         }
+        
 
-        const result = await this.provider.sale({
-            companyId: dto.companyId,
-            merchantReference: dto.merchantReference,
-            amount: dto.amount,
-            scenario: dto.scenario,
-        });
+        let result;
+
+        try {
+            result = await this.provider.sale({
+                companyId: dto.companyId,
+                merchantReference: dto.merchantReference,
+                amount: dto.amount,
+                scenario: dto.scenario,
+            });
+        } catch (error) {
+            payment.status = PaymentStatus.UNKNOWN;
+            payment.failureReason = 'Provider outcome unknown';
+
+            await payment.save();
+
+            throw new ServiceUnavailableException(
+                'Payment outcome is unknown; check payment status before retrying',
+            );
+        }
 
         payment.status = result.status as PaymentStatus;
         payment.providerReference = result.providerReference;
@@ -261,8 +251,9 @@ export class PaymentsService {
     // INQUIRY
     // --------------------------------------------------
 
-    async inquiry(id: string, companyId: string) {
 
+
+    async inquiry(id: string, companyId: string) {
         if (
             !Types.ObjectId.isValid(id) ||
             !Types.ObjectId.isValid(companyId)
@@ -286,44 +277,88 @@ export class PaymentsService {
             return payment.toObject();
         }
 
+        // Provider'dan güncel sonucu öðren.
         const result = await this.provider.inquiry(
             payment.companyId.toString(),
             payment.merchantReference,
         );
 
-        const setFields: Record<string, unknown> = {
-            lastInquiryAt: new Date(),
+        const session = await this.payments.db.startSession();
+
+        const state: { updated: PaymentDocument | null } = {
+            updated: null,
         };
 
-        if (result.status !== 'UNKNOWN') {
-            setFields.status = result.status;
+        try {
+            await session.withTransaction(async () => {
+                const setFields: Record<string, unknown> = {
+                    lastInquiryAt: new Date(),
+                    status: result.status,
+                };
+
+                if (result.providerReference) {
+                    setFields.providerReference = result.providerReference;
+                }
+
+                if (result.reason) {
+                    setFields.failureReason = result.reason;
+                } else if (result.status !== 'UNKNOWN') {
+                    setFields.failureReason = null;
+                }
+
+                state.updated = await this.payments.findOneAndUpdate(
+                    {
+                        _id: payment._id,
+                        companyId: new Types.ObjectId(companyId),
+                        status: payment.status,
+                    },
+                    {
+                        $set: setFields,
+                        $inc: { inquiryAttempts: 1 },
+                    },
+                    {
+                        new: true,
+                        session,
+                    },
+                );
+
+                // Baþka bir iþlem ödeme durumunu deðiþtirmiþ.
+                if (!state.updated) {
+                    return;
+                }
+
+                // Baþarýlý ödeme için Outbox event oluþtur.
+                if (result.status === 'SUCCESS') {
+                    const event = {
+                        eventId: randomUUID(),
+                        paymentId: state.updated._id.toString(),
+                        companyId: state.updated.companyId.toString(),
+                        terminalId: state.updated.terminalId.toString(),
+                        merchantReference: state.updated.merchantReference,
+                        amount: state.updated.amount,
+                        currency: state.updated.currency,
+                        occurredAt: new Date().toISOString(),
+                    };
+
+                    await this.outbox.create(
+                        [
+                            {
+                                eventId: event.eventId,
+                                eventType: 'payment.completed',
+                                aggregateId: state.updated._id.toString(),
+                                payload: event,
+                                status: OutboxEventStatus.PENDING,
+                            },
+                        ],
+                        { session },
+                    );
+                }
+            });
+        } finally {
+            await session.endSession();
         }
 
-        if (result.providerReference) {
-            setFields.providerReference = result.providerReference;
-        }
-
-        if (result.reason) {
-            setFields.failureReason = result.reason;
-        } else if (result.status !== 'UNKNOWN') {
-            setFields.failureReason = null;
-        }
-
-        const updated = await this.payments.findOneAndUpdate(
-            {
-                _id: payment._id,
-                companyId: new Types.ObjectId(companyId),
-                status: payment.status,
-            },
-            {
-                $set: setFields,
-                $inc: { inquiryAttempts: 1 },
-            },
-            { new: true },
-        );
-
-        if (!updated) {
-
+        if (!state.updated) {
             const latest = await this.payments.findOne({
                 _id: payment._id,
                 companyId: new Types.ObjectId(companyId),
@@ -336,8 +371,10 @@ export class PaymentsService {
             return latest.toObject();
         }
 
-        return updated.toObject();
+        return state.updated.toObject();
     }
+
+
 
 
     // --------------------------------------------------
@@ -786,6 +823,12 @@ export class PaymentsService {
             refundRecord._id,
         ).lean();
 
+        if (!completedRefund) {
+            throw new ServiceUnavailableException(
+                'Completed refund record could not be found',
+            );
+        }
+
         return completedRefund;
     }
 
@@ -794,7 +837,9 @@ export class PaymentsService {
     // LIST PAYMENTS
     // --------------------------------------------------
 
-    async listByCompany(companyId: string) {
+    async listByCompany(companyId: string,
+        page: number,
+        limit: number,) {
 
         if (!Types.ObjectId.isValid(companyId)) {
             throw new BadRequestException(
@@ -941,6 +986,32 @@ export class PaymentsService {
         throw new ConflictException(
             'Payment changed concurrently; MQTT message must be retried',
         );
+    }
+
+    async getCompanyPaymentSummary(companyId: string) {
+        return this.payments.aggregate([
+            {
+                $match: {
+                    companyId: new Types.ObjectId(companyId),
+                    status: PaymentStatus.SUCCESS,
+                },
+            },
+            {
+                $group: {
+                    _id: '$currency',
+                    totalAmount: { $sum: '$amount' },
+                    paymentCount: { $sum: 1 },
+                },
+            },
+            {
+                $project: {
+                    _id: 0,
+                    currency: '$_id',
+                    totalAmount: 1,
+                    paymentCount: 1,
+                },
+            },
+        ]);
     }
 
 }

@@ -11,6 +11,7 @@ import { RateLimitGuard } from '../common/rate-limit.guard';
 import { Terminal, TerminalSchema } from '../terminals/terminal.schema';
 import { OutboxModule } from '../outbox/outbox.module';
 import { Refund, RefundSchema } from './refund.schema';
+import { PaymentAnalyticsService } from './payment-analytics.service';
 
 
 @Module({
@@ -29,6 +30,7 @@ import { Refund, RefundSchema } from './refund.schema';
         PaymentsService,
         MockProviderService,
         RateLimitGuard,
+        PaymentAnalyticsService,
     ],
 })
 export class PaymentsModule { }

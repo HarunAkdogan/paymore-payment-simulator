@@ -17,6 +17,9 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundDto } from './dto/refund.dto';
 import { PaymentsService } from './payments.service';
+import { PaymentAnalyticsService } from './payment-analytics.service';
+import { Query } from '@nestjs/common';
+
 
 interface AuthenticatedRequest extends Request {
     user: {
@@ -30,7 +33,7 @@ interface AuthenticatedRequest extends Request {
 @Controller('payments')
 @UseGuards(RateLimitGuard, JwtAuthGuard)
 export class PaymentsController {
-    constructor(private readonly payments: PaymentsService) { }
+    constructor(private readonly payments: PaymentsService, private readonly paymentAnalyticsService: PaymentAnalyticsService,) { }
 
     @Post()
     @ApiHeader({ name: 'Idempotency-Key', required: true })
@@ -55,8 +58,16 @@ export class PaymentsController {
     }
 
     @Get()
-    list(@Req() req: AuthenticatedRequest) {
-        return this.payments.listByCompany(req.user.companyId);
+    list(
+        @Req() req: AuthenticatedRequest,
+        @Query('page') page: string = '1',
+        @Query('limit') limit: string = '10',
+    ) {
+        return this.payments.listByCompany(
+            req.user.companyId,
+            Number(page),
+            Number(limit),
+        );
     }
 
     @Post(':id/inquiry')
@@ -75,6 +86,64 @@ export class PaymentsController {
         return this.payments.void(id, req.user.companyId);
     }
 
+    @Get('analytics/paymentsuccessful')
+    getSuccessfulPayments(@Req() req: AuthenticatedRequest) {
+        return this.paymentAnalyticsService.getSuccessfulPayments(
+            req.user.companyId,
+        );
+
+    }
+
+
+    @Get('analytics/date-range')
+    getCompanyPaymentsByDate(
+        @Req() req: AuthenticatedRequest,
+        @Query('startDate') startDate: string,
+        @Query('endDate') endDate: string,
+    ) {
+        return this.paymentAnalyticsService.getCompanyPaymentsByDate(
+            req.user.companyId,
+            new Date(startDate),
+            new Date(endDate),
+        );
+    }
+
+
+    
+    @Get('analytics/paymentlatest')
+    getLatestCompanyPayments(@Req() req: AuthenticatedRequest) {
+        return this.paymentAnalyticsService.getLatestCompanyPayments(
+            req.user.companyId,
+        );
+
+    }
+
+    @Get('analytics/paymentcount')
+    getCompanyPaymentCount(@Req() req: AuthenticatedRequest) {
+        return this.paymentAnalyticsService.getCompanyPaymentCount(
+            req.user.companyId,
+        );
+
+    }
+
+    @Get('analytics/paymentstatuscount')
+    getCompanyPaymentStatusCount(@Req() req: AuthenticatedRequest) {
+        return this.paymentAnalyticsService.getCompanyPaymentStatusCounts(
+            req.user.companyId,
+        );
+
+    }
+
+    @Get('analytics/summary')
+    getCompanyPaymentSummary(@Req() req: AuthenticatedRequest) {
+        return this.paymentAnalyticsService.getCompanyPaymentSummary(
+            req.user.companyId,
+        );
+
+    }
+
+ 
+
     @Post(':id/refund')
     @ApiHeader({ name: 'Idempotency-Key', required: true })
     @ApiOperation({ summary: 'Refund a payment' })
@@ -91,4 +160,6 @@ export class PaymentsController {
             key,
         );
     }
+
+    
 }

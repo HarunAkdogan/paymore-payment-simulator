@@ -17,6 +17,7 @@ if (!terminalId || !paymentId) {
 
 const clientId = `virtual-pos-${terminalId}`;
 const ackTopic = `pos/payment/status/ack/${terminalId}`;
+const commandTopic = 'pos/payment/command';
 
 const messageId = randomUUID();
 
@@ -42,7 +43,54 @@ function connectPos() {
 
         client.on('message', (topic, payload) => {
             console.log('\n[POS] Message received:', topic);
-            console.log(payload.toString());
+
+            let message;
+
+            try {
+                message = JSON.parse(payload.toString());
+            } catch {
+                console.error('[POS] Invalid JSON');
+                return;
+            }
+
+            // Backend'den gelen ödeme komutu
+            if (topic === commandTopic) {
+                if (message.terminalId !== terminalId) {
+                    return;
+                }
+
+                console.log('[POS] Payment command received:', message);
+
+                const response = {
+                    messageId: message.messageId,
+                    paymentId: message.paymentId,
+                    terminalId: message.terminalId,
+                    status: 'SUCCESS',
+                };
+
+                setTimeout(() => {
+                    client.publish(
+                        'pos/payment/status',
+                        JSON.stringify(response),
+                        { qos: 1, retain: false },
+                        (error) => {
+                            if (error) {
+                                console.error('[POS] Payment response failed:', error.message);
+                                return;
+                            }
+
+                            console.log('[POS] Payment response published:', response);
+                        },
+                    );
+                }, 1500);
+
+                return;
+            }
+
+            // Backend'den gelen uygulama ACK'i
+            if (topic === ackTopic) {
+                console.log('[POS] Application ACK received:', message);
+            }
         });
 
         client.once('error', (error) => {
@@ -56,22 +104,23 @@ function connectPos() {
             console.log('[POS] Connected to MQTT broker');
             console.log('[POS] Existing session:', packet.sessionPresent);
 
-            if (packet.sessionPresent) {
-                console.log('[POS] Persistent subscription restored');
-                resolve();
-                return;
-            }
+            // Eski oturum olsa bile iki kanala da abone ol.
+            client.subscribe(
+                [ackTopic, commandTopic],
+                { qos: 1 },
+                (error) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
 
-            client.subscribe(ackTopic, { qos: 1 }, (error) => {
-                if (error) {
-                    reject(error);
-                    return;
-                }
-
-                console.log('[POS] Subscribed:', ackTopic);
-                resolve();
-            });
+                    console.log('[POS] Subscribed:', ackTopic);
+                    console.log('[POS] Subscribed:', commandTopic);
+                    resolve();
+                },
+            );
         });
+
 
         client.on('close', () => {
             connected = false;

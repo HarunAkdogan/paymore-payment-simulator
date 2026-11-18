@@ -15,6 +15,15 @@ type PaymentStatusMessage = {
     status: 'SUCCESS' | 'DECLINED' | 'PENDING' | 'TIMEOUT';
 };
 
+type PaymentCommandMessage = {
+    messageId: string;
+    paymentId: string;
+    terminalId: string;
+    amount: number;
+    currency: string;
+};
+
+
 type MqttProcessingResult =
     | 'UPDATED'
     | 'DUPLICATE'
@@ -103,6 +112,11 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.client.on('message', async (topic, payload) => {
+
+            this.logger.log(
+                `MQTT message received: topic=${topic}, payload=${payload.toString()}`,
+            );
+
             if (topic !== 'pos/payment/status') {
                 return;
             }
@@ -210,6 +224,39 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
             case 'CONFLICT':
                 return 'RECONCILE';
         }
+    }
+
+    async publishPaymentCommand(
+        command: PaymentCommandMessage,
+    ): Promise<void> {
+        if (!this.client || !this.client.connected) {
+            throw new Error('MQTT client is not connected');
+        }
+
+        const topic = 'pos/payment/command';
+
+        await new Promise<void>((resolve, reject) => {
+            this.client.publish(
+                topic,
+                JSON.stringify(command),
+                {
+                    qos: 1,
+                    retain: false,
+                },
+                (error) => {
+                    if (error) {
+                        reject(error);
+                        return;
+                    }
+
+                    resolve();
+                },
+            );
+        });
+
+        this.logger.log(
+            `Payment command published: ${command.messageId}`,
+        );
     }
 
     async onModuleDestroy(): Promise<void> {
