@@ -117,7 +117,10 @@ describe('PaymentsService', () => {
         payment.amount = 10000;
         payment.refundedAmount = 7000;
         payment.refundPendingAmount = 0;
+        payment.companyId = new Types.ObjectId(dto.companyId);
+        payment.terminalId = new Types.ObjectId(dto.terminalId);
         payment.status = 'SUCCESS';
+        payment.statusHistory = [];
         payment.providerReference = 'mock-ref';
         payment.requestFingerprint = JSON.stringify({
             companyId: dto.companyId,
@@ -131,7 +134,10 @@ describe('PaymentsService', () => {
         payment.save.mockResolvedValue(payment);
         payment.toObject.mockReturnValue(payment);
 
-        model.create.mockResolvedValue(payment);
+        model.create.mockImplementation(async (data: any) => {
+            Object.assign(payment, data);
+            return payment;
+        });
 
         provider.sale.mockResolvedValue({
             status: 'SUCCESS',
@@ -145,6 +151,10 @@ describe('PaymentsService', () => {
         expect(model.create).toHaveBeenCalled();
         expect(provider.sale).toHaveBeenCalled();
         expect(result.status).toBe('SUCCESS');
+        expect(result.statusHistory.map((entry: any) => entry.status)).toEqual([
+            'PENDING',
+            'SUCCESS',
+        ]);
     });
 
     it('idempotency key olmadan ödeme oluşturmamalı', async () => {
@@ -239,6 +249,10 @@ describe('PaymentsService', () => {
 
         expect(provider.sale).toHaveBeenCalledTimes(1);
         expect(payment.status).toBe('UNKNOWN');
+        expect(payment.statusHistory.map((entry: any) => entry.status)).toEqual([
+            'PENDING',
+            'UNKNOWN',
+        ]);
         expect(payment.save).toHaveBeenCalledTimes(1);
     });
 
@@ -272,6 +286,76 @@ describe('PaymentsService', () => {
 
         // Redis'e iki kez kontrol yapılmalı.
         expect(redis.reserveIdempotency).toHaveBeenCalledTimes(2);
+    });
+
+    it('inquiry durum değişikliğini status history içine eklemeli', async () => {
+        const paymentDocument: any = {
+            ...payment,
+            status: 'PENDING',
+            statusHistory: [
+                { status: 'PENDING', changedAt: new Date('2026-01-01T10:00:00.000Z') },
+            ],
+            toObject: jest.fn(),
+        };
+        paymentDocument.toObject.mockReturnValue(paymentDocument);
+
+        model.findOne.mockResolvedValueOnce(paymentDocument);
+        provider.inquiry.mockResolvedValueOnce({
+            status: 'SUCCESS',
+            providerReference: 'mock-ref',
+        });
+
+        model.findOneAndUpdate.mockImplementationOnce(
+            async (_filter: any, update: any) => {
+                const appendedEntries =
+                    update.$push?.statusHistory?.$each ?? [];
+                const updated: any = {
+                    ...paymentDocument,
+                    status: update.$set.status,
+                    statusHistory: [
+                        ...paymentDocument.statusHistory,
+                        ...appendedEntries,
+                    ],
+                    toObject: jest.fn(),
+                };
+                updated.toObject.mockReturnValue(updated);
+                return updated;
+            },
+        );
+
+        const result = await service.inquiry(
+            paymentDocument._id.toString(),
+            paymentDocument.companyId.toString(),
+        );
+
+        expect(result.status).toBe('SUCCESS');
+        expect(result.statusHistory.map((entry: any) => entry.status)).toEqual([
+            'PENDING',
+            'SUCCESS',
+        ]);
+        expect(outbox.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('void başarılı olduğunda VOIDED durumunu history içine eklemeli', async () => {
+        payment.status = 'PENDING';
+        payment.statusHistory = [
+            { status: 'PENDING', changedAt: new Date('2026-01-01T10:00:00.000Z') },
+        ];
+
+        model.findOne.mockResolvedValueOnce(payment);
+        provider.void.mockResolvedValueOnce({ success: true });
+
+        const result = await service.void(
+            payment._id.toString(),
+            payment.companyId.toString(),
+        );
+
+        expect(result.status).toBe('VOIDED');
+        expect(result.statusHistory.map((entry: any) => entry.status)).toEqual([
+            'PENDING',
+            'VOIDED',
+        ]);
+        expect(payment.save).toHaveBeenCalledTimes(1);
     });
 
     it('başarılı refund işlemi yapmalı', async () => {
