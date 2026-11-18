@@ -103,6 +103,46 @@ export class PaymentsService {
             scenario: dto.scenario,
         });
 
+        // Redis prevents duplicate requests from reaching MongoDB and the provider.
+        const reservation = await this.redis.reserveIdempotency(
+            `payment:${dto.companyId}:${idempotencyKey}`,
+            fingerprint,
+            86400,
+        );
+
+        if (reservation === 'CONFLICT') {
+            throw new ConflictException(
+                'Idempotency key was already used with a different request',
+            );
+        }
+
+        if (reservation === 'UNAVAILABLE') {
+            throw new ServiceUnavailableException(
+                'Idempotency store unavailable; retry safely with the same key',
+            );
+        }
+
+        if (reservation === 'EXISTS') {
+            const existing = await this.payments.findOne({
+                companyId: new Types.ObjectId(dto.companyId),
+                idempotencyKey,
+            }).lean();
+
+            if (existing) {
+                if (existing.requestFingerprint !== fingerprint) {
+                    throw new ConflictException(
+                        'Idempotency key was already used with a different request',
+                    );
+                }
+
+                return existing;
+            }
+
+            throw new ConflictException(
+                'Request with this idempotency key is already being processed',
+            );
+        }
+
         let payment: PaymentDocument;
 
         try {
@@ -277,7 +317,7 @@ export class PaymentsService {
             return payment.toObject();
         }
 
-        // Provider'dan güncel sonucu öğren.
+        // Provider'dan gÃ¼ncel sonucu Ã¶Ã°ren.
         const result = await this.provider.inquiry(
             payment.companyId.toString(),
             payment.merchantReference,
@@ -322,12 +362,12 @@ export class PaymentsService {
                     },
                 );
 
-                // Başka bir işlem ödeme durumunu değiştirmiş.
+                // BaÃ¾ka bir iÃ¾lem Ã¶deme durumunu deÃ°iÃ¾tirmiÃ¾.
                 if (!state.updated) {
                     return;
                 }
 
-                // Başarılı ödeme için Outbox event oluştur.
+                // BaÃ¾arÃ½lÃ½ Ã¶deme iÃ§in Outbox event oluÃ¾tur.
                 if (result.status === 'SUCCESS') {
                     const event = {
                         eventId: randomUUID(),
@@ -475,6 +515,38 @@ export class PaymentsService {
             throw new NotFoundException('Payment not found');
         }
 
+        // Check idempotency before payment status and remaining-balance checks.
+        // A retry of a completed full refund must return the original result.
+        const existingRefund = await this.refunds.findOne({
+            companyId: companyObjectId,
+            idempotencyKey,
+        });
+
+        if (existingRefund) {
+            if (
+                existingRefund.paymentId.toString() !== id ||
+                existingRefund.amount !== amount
+            ) {
+                throw new ConflictException(
+                    'Idempotency key already used with different parameters',
+                );
+            }
+
+            if (existingRefund.status === RefundStatus.SUCCESS) {
+                return existingRefund.toObject();
+            }
+
+            if (existingRefund.status === RefundStatus.FAILED) {
+                throw new ConflictException(
+                    'This refund request has already failed',
+                );
+            }
+
+            throw new ConflictException(
+                'Refund is already being processed or requires reconciliation',
+            );
+        }
+
         if (
             payment.status !== PaymentStatus.SUCCESS &&
             payment.status !== PaymentStatus.PARTIALLY_REFUNDED
@@ -501,39 +573,7 @@ export class PaymentsService {
             );
         }
 
-        // Aynı idempotency key daha önce kullanılmış mı?
-        const existingRefund = await this.refunds.findOne({
-            companyId: companyObjectId,
-            idempotencyKey,
-        });
-
-        if (existingRefund) {
-
-            if (
-                existingRefund.paymentId.toString() !== id ||
-                existingRefund.amount !== amount
-            ) {
-                throw new ConflictException(
-                    'Idempotency key already used with different parameters',
-                );
-            }
-
-            if (existingRefund.status === RefundStatus.SUCCESS) {
-                return existingRefund.toObject();
-            }
-
-            if (existingRefund.status === RefundStatus.FAILED) {
-                throw new ConflictException(
-                    'This refund request has already failed',
-                );
-            }
-
-            throw new ConflictException(
-                'Refund is already being processed or requires reconciliation',
-            );
-        }
-
-        // Refund kaydını oluştur.
+        // Refund kaydÃ½nÃ½ oluÃ¾tur.
         let refundRecord: RefundDocument;
 
         try {
@@ -562,7 +602,7 @@ export class PaymentsService {
             throw error;
         }
 
-        // İade tutarını atomik şekilde rezerve et.
+        // Ãade tutarÃ½nÃ½ atomik Ã¾ekilde rezerve et.
         const reservedPayment = await this.payments.findOneAndUpdate(
             {
                 _id: paymentId,
@@ -613,7 +653,7 @@ export class PaymentsService {
             );
         }
 
-        // Provider'a idempotency key ile istek gönder.
+        // Provider'a idempotency key ile istek gÃ¶nder.
         let result: {
             success: boolean;
             refundedAmount: number;
@@ -630,7 +670,7 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Sonuç belirsiz. Rezervasyonu serbest bırakmıyoruz.
+            // SonuÃ§ belirsiz. Rezervasyonu serbest bÃ½rakmÃ½yoruz.
             await this.refunds.updateOne(
                 { _id: refundRecord._id },
                 {
@@ -681,7 +721,7 @@ export class PaymentsService {
             );
         }
 
-        // Provider başarılı dedi ama beklenmeyen sonuç döndürdü.
+        // Provider baÃ¾arÃ½lÃ½ dedi ama beklenmeyen sonuÃ§ dÃ¶ndÃ¼rdÃ¼.
         if (
             result.refundedAmount !== amount ||
             !result.refundReference
@@ -702,7 +742,7 @@ export class PaymentsService {
             );
         }
 
-        // Payment ve Refund güncellemelerini tek transaction içinde yap.
+        // Payment ve Refund gÃ¼ncellemelerini tek transaction iÃ§inde yap.
         const session = await this.payments.db.startSession();
 
         try {
@@ -791,8 +831,8 @@ export class PaymentsService {
 
         } catch (error) {
 
-            // Provider başarılı olmuş olabilir.
-            // Rezervasyonu serbest bırakmıyoruz.
+            // Provider baÃ¾arÃ½lÃ½ olmuÃ¾ olabilir.
+            // Rezervasyonu serbest bÃ½rakmÃ½yoruz.
             await this.refunds.updateOne(
                 {
                     _id: refundRecord._id,
