@@ -823,6 +823,42 @@ export class PaymentsService {
 
             await session.withTransaction(async () => {
 
+                const historyTimestamp = new Date();
+                const nextPaymentStatus = {
+                    $cond: [
+                        {
+                            $eq: [
+                                {
+                                    $add: [
+                                        { $ifNull: ['$refundedAmount', 0] },
+                                        amount,
+                                    ],
+                                },
+                                '$amount',
+                            ],
+                        },
+                        PaymentStatus.REFUNDED,
+                        PaymentStatus.PARTIALLY_REFUNDED,
+                    ],
+                };
+                const currentHistory = {
+                    $ifNull: ['$statusHistory', []],
+                };
+                const baseHistory = {
+                    $cond: [
+                        { $gt: [{ $size: currentHistory }, 0] },
+                        currentHistory,
+                        [
+                            {
+                                status: '$status',
+                                changedAt: {
+                                    $ifNull: ['$createdAt', historyTimestamp],
+                                },
+                            },
+                        ],
+                    ],
+                };
+
                 const updatedPayment = await this.payments.findOneAndUpdate(
                     {
                         _id: paymentId,
@@ -846,90 +882,23 @@ export class PaymentsService {
                                     ],
                                 },
 
-                                status: {
+                                status: nextPaymentStatus,
+                                statusHistory: {
                                     $cond: [
+                                        { $eq: ['$status', nextPaymentStatus] },
+                                        baseHistory,
                                         {
-                                            $eq: [
-                                                {
-                                                    $add: [
-                                                        { $ifNull: ['$refundedAmount', 0] },
-                                                        amount,
-                                                    ],
-                                                },
-                                                '$amount',
+                                            $concatArrays: [
+                                                baseHistory,
+                                                [
+                                                    {
+                                                        status: nextPaymentStatus,
+                                                        changedAt: historyTimestamp,
+                                                    },
+                                                ],
                                             ],
                                         },
-                                        PaymentStatus.REFUNDED,
-                                        PaymentStatus.PARTIALLY_REFUNDED,
                                     ],
-                                },
-                                statusHistory: {
-                                    $let: {
-                                        vars: {
-                                            nextStatus: {
-                                                $cond: [
-                                                    {
-                                                        $eq: [
-                                                            {
-                                                                $add: [
-                                                                    { $ifNull: ['$refundedAmount', 0] },
-                                                                    amount,
-                                                                ],
-                                                            },
-                                                            '$amount',
-                                                        ],
-                                                    },
-                                                    PaymentStatus.REFUNDED,
-                                                    PaymentStatus.PARTIALLY_REFUNDED,
-                                                ],
-                                            },
-                                            currentHistory: {
-                                                $ifNull: ['$statusHistory', []],
-                                            },
-                                        },
-                                        in: {
-                                            $let: {
-                                                vars: {
-                                                    baseHistory: {
-                                                        $cond: [
-                                                            {
-                                                                $gt: [
-                                                                    { $size: '$currentHistory' },
-                                                                    0,
-                                                                ],
-                                                            },
-                                                            '$currentHistory',
-                                                            [
-                                                                {
-                                                                    status: '$status',
-                                                                    changedAt: {
-                                                                        $ifNull: ['$createdAt', '$NOW'],
-                                                                    },
-                                                                },
-                                                            ],
-                                                        ],
-                                                    },
-                                                },
-                                                in: {
-                                                    $cond: [
-                                                        { $eq: ['$status', '$nextStatus'] },
-                                                        '$baseHistory',
-                                                        {
-                                                            $concatArrays: [
-                                                                '$baseHistory',
-                                                                [
-                                                                    {
-                                                                        status: '$nextStatus',
-                                                                        changedAt: '$NOW',
-                                                                    },
-                                                                ],
-                                                            ],
-                                                        },
-                                                    ],
-                                                },
-                                            },
-                                        },
-                                    },
                                 },
                             },
                         },
