@@ -808,4 +808,75 @@ describe('PaymentsService', () => {
         expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    it('provider refund timeout olursa refund UNKNOWN olmali ve rezervasyon korunmali', async () => {
+        const paymentId = payment._id;
+        const companyId = payment.companyId.toString();
+        const amount = 1000;
+        const idempotencyKey = 'refund-provider-timeout-001';
+
+        const paymentDocument = {
+            ...payment,
+            amount: 10000,
+            refundedAmount: 7000,
+            refundPendingAmount: 0,
+            status: 'SUCCESS',
+            providerReference: 'mock-ref',
+        };
+
+        const refundRecord = {
+            _id: new Types.ObjectId(),
+            paymentId: new Types.ObjectId(paymentId),
+            companyId: payment.companyId,
+            idempotencyKey,
+            amount,
+            status: 'PROCESSING',
+        };
+
+        model.findOne.mockResolvedValue(paymentDocument);
+        refund.findOne.mockResolvedValue(null);
+        refund.create.mockResolvedValue(refundRecord);
+
+        // Iade tutari once atomik olarak rezerve edilir.
+        model.findOneAndUpdate.mockResolvedValueOnce({
+            ...paymentDocument,
+            refundPendingAmount: amount,
+        });
+
+        // Provider istegi timeout olur: sonuc belirsizdir.
+        provider.refund.mockRejectedValueOnce(
+            new Error('Provider timeout'),
+        );
+
+        refund.updateOne.mockResolvedValue({ matchedCount: 1 });
+
+        await expect(
+            service.refund(
+                paymentId,
+                companyId,
+                amount,
+                idempotencyKey,
+            ),
+        ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+        expect(provider.refund).toHaveBeenCalledTimes(1);
+
+        // Refund sonucu UNKNOWN olarak kaydedilmeli.
+        expect(refund.updateOne).toHaveBeenCalledWith(
+            { _id: refundRecord._id },
+            {
+                $set: {
+                    status: 'UNKNOWN',
+                    failureReason: 'Provider refund outcome is unknown',
+                },
+            },
+        );
+
+        // Sonuc belirsiz oldugu icin ayrilan tutar serbest birakilmamali.
+        expect(model.updateOne).not.toHaveBeenCalled();
+        expect(session.withTransaction).not.toHaveBeenCalled();
+
+        // Transaction baslamadan onceki rezervasyon yapilmis olmali.
+        expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    });
+
 });
