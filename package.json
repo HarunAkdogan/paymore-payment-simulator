@@ -68,11 +68,7 @@
       "src/**/*.ts"
     ],
     "coverageDirectory": "coverage",
-    "testEnvironment": "node",
-    "testPathIgnorePatterns": [
-      "<rootDir>/node_modules/",
-      "\\.integration\\.spec\\.ts$"
-    ]
+    "testEnvironment": "node"
   },
   "overrides": {
     "file-type": "21.3.2",
