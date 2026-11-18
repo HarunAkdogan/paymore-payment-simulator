@@ -288,6 +288,40 @@ describe('PaymentsService', () => {
         expect(redis.reserveIdempotency).toHaveBeenCalledTimes(2);
     });
 
+    it('MQTT ödeme durumu değişikliğini status history içine eklemeli', async () => {
+        const currentPayment: any = {
+            ...payment,
+            status: 'CREATED',
+            processedMqttMessageIds: [],
+            statusHistory: [],
+            createdAt: new Date('2026-01-01T10:00:00.000Z'),
+        };
+
+        model.findOne.mockReturnValueOnce({
+            select: jest.fn().mockReturnValue({
+                lean: jest.fn().mockResolvedValue(currentPayment),
+            }),
+        });
+        model.findOneAndUpdate.mockResolvedValueOnce({
+            ...currentPayment,
+            status: 'PENDING',
+        });
+
+        const result = await service.applyMqttStatus(
+            payment._id.toString(),
+            payment.terminalId.toString(),
+            'mqtt-message-status-history-001',
+            'PENDING',
+        );
+
+        expect(result).toBe('UPDATED');
+
+        const update = model.findOneAndUpdate.mock.calls[0][1];
+        expect(update.$push.statusHistory.$each.map(
+            (entry: any) => entry.status,
+        )).toEqual(['CREATED', 'PENDING']);
+    });
+
     it('inquiry durum değişikliğini status history içine eklemeli', async () => {
         const paymentDocument: any = {
             ...payment,
@@ -447,6 +481,9 @@ describe('PaymentsService', () => {
         // 1. İade tutarını rezerve etmek.
         // 2. Transaction içinde kesin iade tutarını işlemek.
         expect(model.findOneAndUpdate).toHaveBeenCalledTimes(2);
+
+        const refundPaymentUpdate = model.findOneAndUpdate.mock.calls[1][1];
+        expect(refundPaymentUpdate[0].$set).toHaveProperty('statusHistory');
 
         // MongoDB transaction çalışmalı.
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
